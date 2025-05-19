@@ -260,6 +260,14 @@ client = ClientApp(client_fn=client_fn)
 
 ####
 
+def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
+    # Multiply accuracy of each client by number of examples used
+    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
+    examples = [num_examples for num_examples, _ in metrics]
+
+    # Aggregate and return custom metric (weighted average)
+    return {"accuracy": sum(accuracies) / sum(examples)}
+
 # Create FedAvg strategy
 strategy = FedAvg(
     fraction_fit=1.0,  # Sample 100% of available clients for training
@@ -308,11 +316,3 @@ run_simulation(
     num_supernodes=config.NUM_CLIENTS,
     backend_config=backend_config,
 )
-
-def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
-    # Multiply accuracy of each client by number of examples used
-    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
-    examples = [num_examples for num_examples, _ in metrics]
-
-    # Aggregate and return custom metric (weighted average)
-    return {"accuracy": sum(accuracies) / sum(examples)}
