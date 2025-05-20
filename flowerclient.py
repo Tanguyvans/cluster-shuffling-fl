@@ -3,6 +3,7 @@ import torch
 import flwr as fl
 from opacus import PrivacyEngine
 from opacus.validators import ModuleValidator
+from opacus.data_loader import DPDataLoader
 
 from going_modular.model import Net
 
@@ -10,6 +11,7 @@ from going_modular.data_setup import TensorDataset, DataLoader
 from going_modular.utils import (choice_device, fct_loss, choice_optimizer_fct, choice_scheduler_fct, save_graphs,
                                  save_matrix, save_roc, get_parameters, set_parameters)
 from going_modular.engine import train, test
+from going_modular.security import apply_smpc, sum_shares
 
 import os
 
@@ -19,7 +21,8 @@ class FlowerClient(fl.client.NumPyClient):
                  max_grad_norm=1.2, device="gpu", classes=(*range(10),),
                  learning_rate=0.001, choice_loss="cross_entropy", choice_optimizer="Adam", choice_scheduler=None,
                  step_size=5, gamma=0.1,
-                 save_figure=None, matrix_path=None, roc_path=None, patience=2, pretrained=True, save_model=None):
+                 save_figure=None, matrix_path=None, roc_path=None, patience=2, pretrained=True, save_model=None,
+                 type_ss="additif", threshold=3, m=3):
 
         self.batch_size = batch_size
         self.epochs = epochs
@@ -36,6 +39,14 @@ class FlowerClient(fl.client.NumPyClient):
         self.device = choice_device(device)
         self.classes = classes
         self.patience = patience
+
+        # MPC and clustering parameters
+        self.type_ss = type_ss
+        self.threshold = threshold
+        self.m = m
+        self.list_shapes = None
+        self.frag_weights = []
+        self.connections = {}
 
         # Initialize model
         model = Net(num_classes=len(self.classes), arch=self.model_choice, pretrained=pretrained)
@@ -135,7 +146,15 @@ class FlowerClient(fl.client.NumPyClient):
         if self.save_figure:
             save_graphs(self.save_figure, self.epochs, results)
 
-        return self.get_parameters(config={}), {'len_train': self.len_train, **results}
+        # Apply SMPC if we have connections (clustering is active)
+        if self.connections:
+            encrypted_lists, self.list_shapes = apply_smpc(best_parameters, len(self.connections) + 1, 
+                                                         self.type_ss, self.threshold)
+            # Keep the last share for this client
+            self.frag_weights.append(encrypted_lists.pop())
+            return encrypted_lists, {'len_train': self.len_train, **results}
+        
+        return best_parameters, {'len_train': self.len_train, **results}
 
     def evaluate(self, parameters, config):
         self.set_parameters(parameters)
@@ -154,3 +173,17 @@ class FlowerClient(fl.client.NumPyClient):
                          len(self.classes))
 
         return {'test_loss': loss, 'test_acc': accuracy}
+
+    def add_connection(self, client_id, address):
+        """Add a connection to another client in the same cluster"""
+        self.connections[client_id] = {"address": address}
+
+    def reset_connections(self):
+        """Reset all client connections (called when clusters change)"""
+        self.connections = {}
+        self.frag_weights = []
+
+    @property
+    def sum_weights(self):
+        """Sum the weight shares for MPC"""
+        return sum_shares(self.frag_weights, self.type_ss)

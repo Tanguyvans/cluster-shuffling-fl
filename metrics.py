@@ -141,8 +141,14 @@ class MetricsTracker:
             f.write("=== Communication Overhead Metrics ===\n\n")
             f.write("--- Protocol Communication ---\n")
             f.write(f"Total Protocol Communication: {total_protocol:.2f} MB\n")
-            for comm_type, size in protocol_by_type.items():
-                f.write(f"{comm_type}: {size:.2f} MB ({(size/total_protocol)*100:.1f}%)\n")
+            
+            if total_protocol > 0:
+                for comm_type, size in protocol_by_type.items():
+                    f.write(f"{comm_type}: {size:.2f} MB ({(size/total_protocol)*100:.1f}%)\n")
+            else:
+                f.write("No protocol communication recorded\n")
+                for comm_type, size in protocol_by_type.items():
+                    f.write(f"{comm_type}: {size:.2f} MB\n")
             
             f.write("\n--- Storage Communication ---\n")
             f.write(f"Total Storage Communication: {total_storage:.2f} MB\n")
