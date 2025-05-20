@@ -6,7 +6,8 @@ from flwr.common import Context, Metrics, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.strategy import FedAvg
 
-from pytorchexample.task import Net, get_weights
+from pytorchexample.core.models import Net
+from pytorchexample.core.model_utils import get_weights
 
 
 # Define metric aggregation function
