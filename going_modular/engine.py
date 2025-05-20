@@ -12,7 +12,7 @@ def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, 
     epochs_no_improve = 0
 
     for epoch in tqdm(range(epochs)):
-        epoch_loss, epoch_acc = train_step(model, train_loader, loss_fn, optimizer, device, scheduler)
+        epoch_loss, epoch_acc = train_step(model, train_loader, loss_fn, optimizer, device, scheduler, privacy_engine)
         tmp = ""
 
         val_loss, val_acc, _, _, _ = test(model, val_loader, loss_fn, device=device)
@@ -51,8 +51,7 @@ def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, 
     return results
 
 
-def train_step(model, dataloader, loss_fn, optimizer, device, scheduler=None):
-    # Put model in training mode
+def train_step(model, dataloader, loss_fn, optimizer, device, scheduler=None, privacy_engine=None):
     model.train()
     accuracy = 0
     epoch_loss = 0
@@ -72,6 +71,9 @@ def train_step(model, dataloader, loss_fn, optimizer, device, scheduler=None):
         # Zero the gradients before running the backward pass.
         optimizer.zero_grad()
         loss.backward()
+        
+        # The optimizer's step method is already modified by the privacy engine
+        # if it was properly initialized
         optimizer.step()
 
         # 3. Calculate accuracy
@@ -88,8 +90,6 @@ def train_step(model, dataloader, loss_fn, optimizer, device, scheduler=None):
 
     if scheduler:
         scheduler.step()
-    else:
-        print("\nNo scheduler")
 
     return epoch_loss, accuracy
 

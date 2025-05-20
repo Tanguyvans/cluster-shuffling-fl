@@ -1,12 +1,12 @@
 settings = {
     "name_dataset": "cifar10",  # "cifar10" or "cifar100" or "caltech256"
-    "arch": "mobilenet",  # "mobilenet" or "resnet18" or "shufflenet"
+    "arch": "simplenet",  # "mobilenet" or "resnet18" or "shufflenet"
     "pretrained": True,
     "patience": 3,
     "batch_size": 32,
     "n_epochs": 15,
-    "number_of_nodes": 3,
-    "number_of_clients_per_node": 15,
+    "number_of_nodes": 1,
+    "number_of_clients_per_node": 3,
     "min_number_of_clients_in_cluster": 3,
 
     "check_usefulness": True,
@@ -21,7 +21,7 @@ settings = {
     "choice_scheduler": "StepLR",  # "StepLR" or None
     "step_size": 3,
     "gamma": 0.5,
-    "diff_privacy": False,
+    "diff_privacy": True,
     "secret_sharing": "additif",  # "additif" or "shamir"
     "k": 3,
     "m": 3,

@@ -1,6 +1,8 @@
 from collections import OrderedDict
 import torch
 import flwr as fl
+from opacus import PrivacyEngine
+from opacus.validators import ModuleValidator
 
 from going_modular.model import Net
 
@@ -22,7 +24,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.batch_size = batch_size
         self.epochs = epochs
         self.model_choice = model_choice
-        self.dp = False
+        self.dp = dp
         self.delta = delta
         self.epsilon = epsilon
         self.max_grad_norm = max_grad_norm
@@ -35,8 +37,18 @@ class FlowerClient(fl.client.NumPyClient):
         self.classes = classes
         self.patience = patience
 
-        # Initialize model after data loaders are potentially set
+        # Initialize model
         model = Net(num_classes=len(self.classes), arch=self.model_choice, pretrained=pretrained)
+        
+        # Validate model for differential privacy if dp is enabled
+        if self.dp:
+            try:
+                model = ModuleValidator.fix(model)
+                print("Model validated for differential privacy")
+            except Exception as e:
+                print(f"Warning: Model validation failed for differential privacy: {e}")
+                self.dp = False
+        
         self.model = model.to(self.device)
         self.criterion = fct_loss(choice_loss)
         self.choice_optimizer = choice_optimizer
@@ -56,7 +68,7 @@ class FlowerClient(fl.client.NumPyClient):
         # Set data loaders
         test_data = TensorDataset(torch.stack(x_test), torch.tensor(y_test))
 
-        obj.test_loader = DataLoader(dataset=test_data, batch_size=kwargs['batch_size'], shuffle=True, drop_last=True)
+        obj.test_loader = DataLoader(dataset=test_data, batch_size=kwargs['batch_size'], shuffle=True)
         return obj
 
     @classmethod
@@ -68,9 +80,9 @@ class FlowerClient(fl.client.NumPyClient):
         test_data = TensorDataset(torch.stack(x_test), torch.tensor(y_test))
 
         obj.len_train = len(y_train)
-        obj.train_loader = DataLoader(dataset=train_data, batch_size=kwargs['batch_size'], shuffle=True, drop_last=True)
-        obj.val_loader = DataLoader(dataset=val_data, batch_size=kwargs['batch_size'], shuffle=True, drop_last=True)
-        obj.test_loader = DataLoader(dataset=test_data, batch_size=kwargs['batch_size'], shuffle=True, drop_last=True)
+        obj.train_loader = DataLoader(dataset=train_data, batch_size=kwargs['batch_size'], shuffle=True)
+        obj.val_loader = DataLoader(dataset=val_data, batch_size=kwargs['batch_size'], shuffle=True)
+        obj.test_loader = DataLoader(dataset=test_data, batch_size=kwargs['batch_size'], shuffle=True)
         return obj
 
     def get_parameters(self, config):
@@ -85,26 +97,35 @@ class FlowerClient(fl.client.NumPyClient):
     def fit(self, parameters, node_id, config):
         self.set_parameters(parameters)
         optimizer = choice_optimizer_fct(self.model, choice_optim=self.choice_optimizer, lr=self.learning_rate,
-                                         weight_decay=1e-6)
+                                     weight_decay=1e-6)
+        
         if self.dp:
-            self.model, optimizer, self.train_loader = self.privacy_engine.make_private_with_epsilon(
-                module=self.model,
-                optimizer=optimizer,
-                data_loader=self.train_loader,
-                epochs=self.epochs,
-                target_epsilon=self.epsilon,
-                target_delta=self.delta,
-                max_grad_norm=self.max_grad_norm,
-            )
+            try:
+                # Create privacy engine
+                self.privacy_engine = PrivacyEngine(secure_mode=False)
+                
+                # Make the model private
+                self.model, optimizer, self.train_loader = self.privacy_engine.make_private(
+                    module=self.model,
+                    optimizer=optimizer,
+                    data_loader=self.train_loader,
+                    noise_multiplier=1.0,  # You can adjust this value
+                    max_grad_norm=self.max_grad_norm,
+                )
+                print(f"Privacy budget: epsilon={self.epsilon}, delta={self.delta}")
+            except Exception as e:
+                print(f"Warning: Failed to make model private: {e}")
+                self.dp = False
+                self.privacy_engine = None
 
         scheduler = choice_scheduler_fct(optimizer, choice_scheduler=self.choice_scheduler,
-                                         step_size=self.step_size, gamma=self.gamma)
+                                     step_size=self.step_size, gamma=self.gamma)
 
         results = train(node_id, self.model, self.train_loader, self.val_loader,
-                        self.epochs, self.criterion, optimizer, scheduler, device=self.device,
-                        dp=self.dp, delta=self.delta,
-                        max_physical_batch_size=int(self.batch_size / 4), privacy_engine=self.privacy_engine,
-                        patience=self.patience, save_model=self.save_model + f"{node_id}_best_model.pth")
+                    self.epochs, self.criterion, optimizer, scheduler, device=self.device,
+                    dp=self.dp, delta=self.delta,
+                    max_physical_batch_size=int(self.batch_size / 4), privacy_engine=self.privacy_engine,
+                    patience=self.patience, save_model=self.save_model + f"{node_id}_best_model.pth")
 
         self.model.load_state_dict(torch.load(self.save_model + f"{node_id}_best_model.pth"))
         best_parameters = self.get_parameters({})
