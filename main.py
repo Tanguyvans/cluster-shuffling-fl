@@ -810,6 +810,15 @@ def create_clients(train_sets, test_sets, node, number_of_clients, save_results,
                 'threshold': settings['k'],
                 'm': settings['m']
             })
+
+        # Add DP parameters from settings
+        if settings.get('diff_privacy', False):
+            client_kwargs.update({
+                'epsilon': settings.get('dp_epsilon', 1.0),
+                'delta': settings.get('dp_delta', 1e-5),
+                'max_grad_norm': settings.get('dp_max_grad_norm', 1.2),
+                'noise_multiplier': settings.get('dp_noise_multiplier', 1.0)
+            })
         
         # Create the client
         client = Client(**client_kwargs)

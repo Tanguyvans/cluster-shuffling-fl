@@ -22,10 +22,14 @@ settings = {
     "step_size": 3,
     "gamma": 0.5,
 
-    'use_clustering': False,
+    'use_clustering': True,
     "secret_sharing": "additif",  # "additif" or "shamir"
 
     "diff_privacy": True,
+    "dp_epsilon": 1.0,  # Epsilon for differential privacy
+    "dp_delta": 1e-5,  # Delta for differential privacy
+    "dp_max_grad_norm": 1.2,  # Max gradient norm for differential privacy
+    "dp_noise_multiplier": 1.0, # Noise multiplier for differential privacy
     "k": 3,
     "m": 3,
     "ts": 5,

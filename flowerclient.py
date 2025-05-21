@@ -22,7 +22,7 @@ class FlowerClient(fl.client.NumPyClient):
                  learning_rate=0.001, choice_loss="cross_entropy", choice_optimizer="Adam", choice_scheduler=None,
                  step_size=5, gamma=0.1,
                  save_figure=None, matrix_path=None, roc_path=None, patience=2, pretrained=True, save_model=None,
-                 type_ss="additif", threshold=3, m=3):
+                 type_ss="additif", threshold=3, m=3, noise_multiplier=1.0):
 
         self.batch_size = batch_size
         self.epochs = epochs
@@ -31,6 +31,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.delta = delta
         self.epsilon = epsilon
         self.max_grad_norm = max_grad_norm
+        self.noise_multiplier = noise_multiplier
         self.learning_rate = learning_rate
         self.train_loader = None
         self.val_loader = None
@@ -120,7 +121,7 @@ class FlowerClient(fl.client.NumPyClient):
                     module=self.model,
                     optimizer=optimizer,
                     data_loader=self.train_loader,
-                    noise_multiplier=1.0,  # You can adjust this value
+                    noise_multiplier=self.noise_multiplier,
                     max_grad_norm=self.max_grad_norm,
                 )
                 print(f"Privacy budget: epsilon={self.epsilon}, delta={self.delta}")
