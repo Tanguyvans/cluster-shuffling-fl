@@ -17,6 +17,8 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 from scikeras.wrappers import KerasClassifier
 
+import torch
+
 NUM_CLASSES = 10
 WIDTH = 32
 HEIGHT = 32
@@ -105,6 +107,94 @@ def attack_model_fn():
         # epochs=FLAGS.attack_epochs, # epochs for fit will be passed in fit_kwargs
         # verbose=0
     )
+    return model
+
+
+def load_pytorch_model(npz_path):
+    """Load PyTorch model weights from .npz file"""
+    try:
+        data = np.load(npz_path)
+        # Convert numpy arrays to torch tensors
+        weights = {k: torch.from_numpy(v) for k, v in data.items()}
+        return weights
+    except Exception as e:
+        print(f"Error loading model from {npz_path}: {e}")
+        return None
+
+
+def create_tf_model_from_pytorch(pytorch_model_path, model_type="SimpleNet"):
+    """Convert PyTorch model to TensorFlow model"""
+    
+    # Load PyTorch weights
+    weights = load_pytorch_model(pytorch_model_path)
+    if weights is None:
+        raise ValueError(f"Failed to load weights from {pytorch_model_path}")
+    
+    if model_type == "SimpleNet":
+        # Create equivalent TensorFlow model
+        model = tf.keras.Sequential([
+            # Conv1
+            layers.Conv2D(6, (5, 5), activation='relu', padding='valid', input_shape=(32, 32, 3)),
+            layers.MaxPooling2D((2, 2)),
+            
+            # Conv2
+            layers.Conv2D(16, (5, 5), activation='relu', padding='valid'),
+            layers.MaxPooling2D((2, 2)),
+            
+            # Flatten
+            layers.Flatten(),
+            
+            # FC layers
+            layers.Dense(120, activation='relu'),
+            layers.Dense(84, activation='relu'),
+            layers.Dense(10, activation='softmax')
+        ])
+        
+        # Compile the model
+        model.compile(
+            optimizer='adam',
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+        
+        # Map weights from PyTorch to TensorFlow
+        # PyTorch weights are in NCHW format, TensorFlow expects NHWC
+        tf_weights = []
+        
+        # Conv1 weights
+        conv1_w = weights['model.conv1.weight'].numpy()
+        conv1_w = np.transpose(conv1_w, (2, 3, 1, 0))  # NCHW -> NHWC
+        conv1_b = weights['model.conv1.bias'].numpy()
+        tf_weights.extend([conv1_w, conv1_b])
+        
+        # Conv2 weights
+        conv2_w = weights['model.conv2.weight'].numpy()
+        conv2_w = np.transpose(conv2_w, (2, 3, 1, 0))  # NCHW -> NHWC
+        conv2_b = weights['model.conv2.bias'].numpy()
+        tf_weights.extend([conv2_w, conv2_b])
+        
+        # FC layers weights
+        fc1_w = weights['model.fc1.weight'].numpy()
+        fc1_b = weights['model.fc1.bias'].numpy()
+        tf_weights.extend([fc1_w.T, fc1_b])  # Transpose weight matrix
+        
+        fc2_w = weights['model.fc2.weight'].numpy()
+        fc2_b = weights['model.fc2.bias'].numpy()
+        tf_weights.extend([fc2_w.T, fc2_b])
+        
+        fc3_w = weights['model.fc3.weight'].numpy()
+        fc3_b = weights['model.fc3.bias'].numpy()
+        tf_weights.extend([fc3_w.T, fc3_b])
+        
+        # Set weights
+        model.set_weights(tf_weights)
+        
+    return model
+
+
+def prepare_model_for_mia(model):
+    """Prepare the model for MIA by adding necessary layers"""
+    # Add any preprocessing or additional layers needed for MIA
     return model
 
 
@@ -201,5 +291,50 @@ def demo(argv):
     print(f"Attack Accuracy: {attack_accuracy}")
 
 
+def demo_with_converted_model(argv):
+    del argv  # Unused.
+
+    # Load and convert your PyTorch model
+    model_path = "/Users/tanguyvans/Desktop/umons/cluster-shuffling-fl/trained_models/trained_model.npz"
+    
+    try:
+        # First, let's inspect the .npz file
+        data = np.load(model_path)
+        print("Available keys in the .npz file:", data.files)
+        
+        # Convert the model
+        converted_model = create_tf_model_from_pytorch(model_path, model_type="SimpleNet")
+        
+        # Get the data
+        (X_train, y_train), (X_test, y_test) = get_data()
+        
+        # Evaluate on test set
+        print("\nEvaluating model on test set...")
+        test_loss, test_accuracy = converted_model.evaluate(X_test, y_test, verbose=1)
+        print(f"\nTest accuracy: {test_accuracy:.4f}")
+        print(f"Test loss: {test_loss:.4f}")
+        
+        # Get predictions for confusion matrix
+        y_pred = converted_model.predict(X_test)
+        y_pred_classes = np.argmax(y_pred, axis=1)
+        y_true_classes = np.argmax(y_test, axis=1)
+        
+        # Calculate per-class accuracy
+        class_accuracy = {}
+        for i in range(NUM_CLASSES):
+            mask = y_true_classes == i
+            if np.sum(mask) > 0:  # Avoid division by zero
+                class_acc = np.mean(y_pred_classes[mask] == y_true_classes[mask])
+                class_accuracy[i] = class_acc
+        
+        print("\nPer-class accuracy:")
+        for class_idx, acc in class_accuracy.items():
+            print(f"Class {class_idx}: {acc:.4f}")
+        
+    except Exception as e:
+        print(f"Error in demo_with_converted_model: {e}")
+        raise
+
+
 if __name__ == "__main__":
-    app.run(demo)
+    app.run(demo_with_converted_model)

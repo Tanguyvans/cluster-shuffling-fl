@@ -461,9 +461,14 @@ class Node:
         weights_dict = self.flower_client.get_dict_params({})
         weights_dict['len_dataset'] = 0
 
-        filename = f"models/CFL/m0.npz"
+        global_model_dir = os.path.join(self.save_results, "global_models")
+        os.makedirs(global_model_dir, exist_ok=True)
+        filename = os.path.join(global_model_dir, f"node_{self.id}_round_0_global_model.npz")
+        
         self.global_params_directory = filename
-        os.makedirs("models/CFL/", exist_ok=True)
+        # The following line was for a different directory structure, 
+        # ensure "models/CFL/" is not strictly needed or adapt if other parts rely on it.
+        # os.makedirs("models/CFL/", exist_ok=True) # Potentially remove if not needed by other logic
         
         # Ajouter le tracking du stockage
         if self.metrics_tracker:
@@ -472,11 +477,17 @@ class Node:
             
         with open(filename, "wb") as fi:
             np.savez(fi, **weights_dict)
+        print(f"[Node {self.id}] Saved first global model to {filename}")
 
         self.broadcast_model_to_clients(filename)
 
     def create_global_model(self, models_arg, index, two_step=False):
         processing_list = []  # This will hold tuples of (client_weight_params, client_num_examples, original_client_id)
+        
+        global_model_dir = os.path.join(self.save_results, "global_models")
+        os.makedirs(global_model_dir, exist_ok=True)
+        # Define filename for the new global model early
+        new_global_model_filename = os.path.join(global_model_dir, f"node_{self.id}_round_{index}_global_model.npz")
 
         if models_arg:
             # If models are passed directly, create placeholder IDs and default num_examples
@@ -495,18 +506,22 @@ class Node:
 
         if not processing_list:
             print(f"\n[Node {self.id}] No client models to process for round {index}. Keeping current global model.")
-            filename = f"models/CFL/m{index}.npz"
             if os.path.exists(self.global_params_directory):
-                shutil.copy2(self.global_params_directory, filename)
-                self.global_params_directory = filename
-            else: # Should not happen if create_first_global_model was called
-                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory}")
-                # Potentially create a new initial model or handle error
-                self.create_first_global_model() # Fallback, creates m0.npz, then broadcast. This might not be m{index}.npz
-                # For safety, let's ensure it saves as m{index}.npz if it's a fallback here.
-                if self.global_params_directory != filename: # If create_first_global_model saved as m0
-                     shutil.copy2(self.global_params_directory, filename)
-                     self.global_params_directory = filename
+                shutil.copy2(self.global_params_directory, new_global_model_filename)
+                self.global_params_directory = new_global_model_filename
+                print(f"[Node {self.id}] Copied previous global model to {new_global_model_filename}")
+            else: 
+                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory}. Creating a new one for round {index}.")
+                # This fallback might create m0 again, then copy. Better to ensure it saves as new_global_model_filename.
+                # For simplicity, we'll call a modified first_global_model or similar logic here to save with the correct round number.
+                # Simplified fallback: create a new initial model and save it with the current round's filename.
+                weights_dict = self.flower_client.get_dict_params({})
+                weights_dict['len_dataset'] = 0
+                with open(new_global_model_filename, "wb") as fi:
+                    np.savez(fi, **weights_dict)
+                self.global_params_directory = new_global_model_filename
+                print(f"[Node {self.id}] Created and saved new initial global model for round {index} at {new_global_model_filename}")
+
 
             self.broadcast_model_to_clients(self.global_params_directory)
             self.received_weights_info = [] # Clear received weights for the next round
@@ -520,31 +535,36 @@ class Node:
         global_weights_dict = np.load(self.global_params_directory)
         global_weights_params = [val for name, val in global_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
         
+        # Temporary directory for client models during usefulness check
+        temp_model_eval_dir = os.path.join(self.save_results, "temp_client_models_for_eval")
+        os.makedirs(temp_model_eval_dir, exist_ok=True)
+
         # For each client model received/passed
         for client_weight_params, client_num_examples, original_client_id in processing_list:
             if self.check_usefulness:
                 # Sauvegarder temporairement le modèle client pour évaluation
-                temp_filename = f"models/CFL/temp_{original_client_id}_round_{index}.npz" # Use actual client_id
+                temp_filename = os.path.join(temp_model_eval_dir, f"temp_{original_client_id}_round_{index}.npz")
                 
                 self.flower_client.set_parameters(client_weight_params)
                 temp_weights_dict = self.flower_client.get_dict_params({})
-                temp_weights_dict['len_dataset'] = client_num_examples # Use actual num_examples or 0 if not meaningful
+                temp_weights_dict['len_dataset'] = client_num_examples 
                 
                 with open(temp_filename, "wb") as fi:
                     np.savez(fi, **temp_weights_dict)
 
-                # Vérifier si le modèle est utile
-                if self.is_update_useful(temp_filename, list(self.clients.keys())): # participants for is_update_useful are all clients of node
+                if self.is_update_useful(temp_filename, list(self.clients.keys())): 
                     useful_weights_for_agg.append((client_weight_params, client_num_examples))
                     useful_client_ids_log.append(original_client_id)
                 else:
                     not_useful_client_ids_log.append(original_client_id)
                     
-                # Nettoyer le fichier temporaire
                 os.remove(temp_filename)
-            else: # Not checking usefulness
+            else: 
                 useful_weights_for_agg.append((client_weight_params, client_num_examples))
                 useful_client_ids_log.append(original_client_id)
+        
+        if os.path.exists(temp_model_eval_dir): # Clean up temp directory
+            shutil.rmtree(temp_model_eval_dir)
 
         # Afficher le résumé des modèles utiles et non utiles
         print(f"\n=== Round {index} Model Usefulness Summary ===")
@@ -565,50 +585,47 @@ class Node:
             print(f"\n[Node {self.id}] Starting final aggregation with {len(useful_weights_for_agg)} useful client models.")
             print(f"[Node {self.id}] Useful models from clients: {', '.join(sorted(useful_client_ids_log))}")
             
-            # Ajouter le modèle global avec un poids plus important
-            # The num_examples (20) for global_weights_params is a weighting factor for aggregation
             useful_weights_for_agg.append((global_weights_params, 20)) 
             print(f"[Node {self.id}] Added current global model to the aggregation set (effective models for agg: {len(useful_weights_for_agg)}).")
             
-            # Agréger les modèles utiles
-            aggregated_weights = aggregate(useful_weights_for_agg) # aggregate expects list of (parameters, num_examples)
+            aggregated_weights = aggregate(useful_weights_for_agg)
             print(f"[Node {self.id}] Completed aggregation of useful models and global model.")
             metrics = self.flower_client.evaluate(aggregated_weights, {})
 
             self.flower_client.set_parameters(aggregated_weights)
             weights_dict = self.flower_client.get_dict_params({})
-            weights_dict['len_dataset'] = 0 # Or sum of num_examples? For now, 0 as in original.
+            weights_dict['len_dataset'] = 0 
 
-            filename = f"models/CFL/m{index}.npz"
-            self.global_params_directory = filename
+            self.global_params_directory = new_global_model_filename
             
             if self.metrics_tracker:
                 file_size = sys.getsizeof(pickle.dumps(weights_dict)) / (1024 * 1024)
                 self.metrics_tracker.record_storage_communication(index, file_size, 'save')
                 
-            with open(filename, "wb") as fi:
+            with open(self.global_params_directory, "wb") as fi:
                 np.savez(fi, **weights_dict)
+            print(f"[Node {self.id}] Saved aggregated global model for round {index} to {self.global_params_directory}")
 
             with open(self.save_results + "output.txt", "a") as fi:
                 fi.write(f"Round {index}, Global aggregation after usefulness check: {metrics}\n")
         else:
             print(f"\n[Node {self.id}] No useful client models found for round {index}. Keeping current global model.")
-            # Copier le modèle global actuel pour le prochain round
-            filename = f"models/CFL/m{index}.npz"
             if os.path.exists(self.global_params_directory):
-                shutil.copy2(self.global_params_directory, filename)
-                self.global_params_directory = filename
-            else: # Should not happen
-                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory} when no useful models.")
-                self.create_first_global_model() # Fallback
-                if self.global_params_directory != filename:
-                     shutil.copy2(self.global_params_directory, filename)
-                     self.global_params_directory = filename
+                shutil.copy2(self.global_params_directory, new_global_model_filename)
+                self.global_params_directory = new_global_model_filename
+                print(f"[Node {self.id}] Copied previous global model to {new_global_model_filename} as no useful models found.")
+            else: 
+                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory} and no useful models.")
+                # Fallback: create a new initial model and save it with the current round's filename.
+                weights_dict = self.flower_client.get_dict_params({})
+                weights_dict['len_dataset'] = 0
+                with open(new_global_model_filename, "wb") as fi:
+                    np.savez(fi, **weights_dict)
+                self.global_params_directory = new_global_model_filename
+                print(f"[Node {self.id}] Created and saved new initial global model for round {index} at {new_global_model_filename}")
 
 
         self.broadcast_model_to_clients(self.global_params_directory)
-
-        # Clear received weights_info for the next round
         self.received_weights_info = []
 
     def get_keys(self, private_key_path, public_key_path):
@@ -713,72 +730,117 @@ class Node:
 
 client_weights = []
 
-def train_client(client_obj, metrics_tracker=None):
+def train_client(client_obj, metrics_tracker=None, current_round=0):
     # Train the model - client_obj.train() should now always return raw weights or None
-    print(f"[Client {client_obj.id}] Starting training...")
+    print(f"[Client {client_obj.id}] Starting training for round {current_round}...")
     weights = client_obj.train() 
 
     if weights is None:
-        print(f"[Client {client_obj.id}] Training returned no weights (possibly failed or no global model). Not sending anything.")
+        print(f"[Client {client_obj.id}] Training returned no weights (round {current_round}). Not sending anything.")
         training_barrier.wait()
         return
 
-    print(f"[Client {client_obj.id}] Training finished. Received raw weights of type: {type(weights)}")
+    print(f"[Client {client_obj.id}] Training finished for round {current_round}. Received raw weights of type: {type(weights)}")
 
     if settings.get('use_clustering', False):
-        print(f"[Client {client_obj.id}] Clustering ENABLED.")
+        print(f"[Client {client_obj.id}] Clustering ENABLED for round {current_round}.")
         if not client_obj.connections:
-            print(f"[Client {client_obj.id}] Clustering enabled, but client has NO connections (cluster of 1).")
+            print(f"[Client {client_obj.id}] Clustering enabled, but client has NO connections (cluster of 1) for round {current_round}.")
         
         try:
-            print(f"[Client {client_obj.id}] Applying SMPC to raw weights for {len(client_obj.connections) + 1} shares...")
-            encrypted_lists, client_obj.list_shapes = apply_smpc(
-                weights, 
+            print(f"[Client {client_obj.id}] Applying SMPC to raw weights for {len(client_obj.connections) + 1} shares (round {current_round})...")
+            # Ensure apply_smpc is called with weights which are a list of np.ndarray
+            smpc_input_weights = weights # weights from client_obj.train() -> res from FlowerClient.fit
+            
+            all_shares, client_obj.list_shapes = apply_smpc(
+                smpc_input_weights, 
                 len(client_obj.connections) + 1,
                 client_obj.type_ss, 
                 client_obj.threshold
             )
-            print(f"[Client {client_obj.id}] SMPC applied. Generated {len(encrypted_lists) +1} shares in total.")
+            print(f"[Client {client_obj.id}] SMPC applied for round {current_round}. Generated {len(all_shares)} shares in total.")
+
+            # Save all generated fragments/shares
+            fragments_dir = os.path.join(settings['save_results'], "fragments")
+            os.makedirs(fragments_dir, exist_ok=True)
+            shares_to_send = list(all_shares) # Create a mutable copy for sending
+
+            for i, share_data in enumerate(all_shares):
+                # share_data is a list of numpy arrays (parameters for one share)
+                share_dict = {f"param_{j}": param for j, param in enumerate(share_data)}
+                if client_obj.list_shapes:
+                    try:
+                        share_dict["list_shapes"] = np.array(client_obj.list_shapes, dtype=object)
+                    except Exception as e:
+                        print(f"[Client {client_obj.id}] Warning: Could not directly save list_shapes for share {i} (round {current_round}): {e}")
+                
+                frag_filename = os.path.join(
+                    fragments_dir,
+                    f"{client_obj.id}_round_{current_round}_frag_share_{i}.npz" 
+                )
+                with open(frag_filename, "wb") as fi:
+                    np.savez(fi, **share_dict)
+                # print(f"[Client {client_obj.id}] Saved fragment share {i} to {frag_filename} (round {current_round})")
             
-            client_obj.frag_weights.append(encrypted_lists.pop()) # Keep one share
-            print(f"[Client {client_obj.id}] Kept 1 share for self. Sending {len(encrypted_lists)} share(s) to {len(client_obj.connections)} peer(s).")
-            if len(encrypted_lists) != len(client_obj.connections):
-                print(f"[Client {client_obj.id}] WARNING: Number of shares to send ({len(encrypted_lists)}) does not match number of connections ({len(client_obj.connections)}). This might be an issue if not a cluster of 1.")
+            client_obj.frag_weights.append(shares_to_send.pop()) # Keep one share (modifies shares_to_send)
+            print(f"[Client {client_obj.id}] Kept 1 share for self. Sending {len(shares_to_send)} share(s) to {len(client_obj.connections)} peer(s) (round {current_round}).")
+            
+            if len(shares_to_send) != len(client_obj.connections):
+                print(f"[Client {client_obj.id}] WARNING (round {current_round}): Number of shares to send ({len(shares_to_send)}) does not match number of connections ({len(client_obj.connections)}). This might be an issue if not a cluster of 1.")
 
             if client_obj.connections: # Only send if there are actual connections
-                client_obj.send_frag_clients(encrypted_lists)
+                client_obj.send_frag_clients(shares_to_send) # Send remaining shares
             
-            print(f"[Client {client_obj.id}] Attempting to get summed weights (will trigger sum_weights property)...")
+            print(f"[Client {client_obj.id}] Attempting to get summed weights (round {current_round})...")
             summed_w = client_obj.sum_weights 
             
             if summed_w is not None:
-                print(f"[Client {client_obj.id}] Successfully obtained summed weights. Proceeding to send to node.")
+                print(f"[Client {client_obj.id}] Successfully obtained summed weights for round {current_round}. Proceeding to send to node.")
+                
+                # Save cluster-aggregated model
+                cluster_models_dir = os.path.join(settings['save_results'], "cluster_models")
+                os.makedirs(cluster_models_dir, exist_ok=True)
+                cluster_model_dict = {f"param_{j}": param for j, param in enumerate(summed_w)}
+                if client_obj.list_shapes: # list_shapes from the original pre-SMPC model structure
+                    try:
+                        cluster_model_dict["list_shapes"] = np.array(client_obj.list_shapes, dtype=object)
+                    except Exception as e:
+                        print(f"[Client {client_obj.id}] Warning: Could not directly save list_shapes for cluster sum (round {current_round}): {e}")
+
+                cluster_sum_filename = os.path.join(
+                    cluster_models_dir,
+                    f"{client_obj.id}_round_{current_round}_cluster_sum.npz"
+                )
+                with open(cluster_sum_filename, "wb") as fi:
+                    np.savez(fi, **cluster_model_dict)
+                print(f"[Client {client_obj.id}] Saved cluster summed model to {cluster_sum_filename} (round {current_round})")
+
                 client_obj.send_frag_node() 
-                print(f"[Client {client_obj.id}] Call to send_frag_node completed (clustering).")
+                print(f"[Client {client_obj.id}] Call to send_frag_node completed (clustering, round {current_round}).")
             else:
-                print(f"[Client {client_obj.id}] Sum of fragments is None (e.g. timeout or insufficient frags). **SKIPPING send_frag_node (clustering).**")
+                print(f"[Client {client_obj.id}] Sum of fragments is None (round {current_round}). **SKIPPING send_frag_node (clustering).**")
         except Exception as e:
-            print(f"[Client {client_obj.id}] Exception during clustering/SMPC process: {e}")
+            print(f"[Client {client_obj.id}] Exception during clustering/SMPC process (round {current_round}): {e}")
             import traceback
             traceback.print_exc()
     else:
         # Regular FL path - send weights directly to node
-        print(f"\n[Client {client_obj.id}] Clustering DISABLED. Preparing to send raw weights directly to node.")
+        print(f"\n[Client {client_obj.id}] Clustering DISABLED (round {current_round}). Preparing to send raw weights directly to node.")
         try:
             if metrics_tracker:
                 weights_size = sys.getsizeof(pickle.dumps(weights)) / (1024 * 1024)
-                metrics_tracker.record_protocol_communication(0, weights_size, "client-node")
+                metrics_tracker.record_protocol_communication(current_round, weights_size, "client-node") # Use current_round
             
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             node_address = client_obj.node.get('address')
             if not node_address:
-                print(f"[Client {client_obj.id}] Node address not set. Cannot send weights.")
+                print(f"[Client {client_obj.id}] Node address not set (round {current_round}). Cannot send weights.")
                 training_barrier.wait()
                 return
 
-            print(f"[Client {client_obj.id}] Connecting to node at {node_address} to send raw weights.")
+            print(f"[Client {client_obj.id}] Connecting to node at {node_address} to send raw weights (round {current_round}).")
             client_socket.connect(node_address)
-            print(f"[Client {client_obj.id}] Connected to node.")
+            print(f"[Client {client_obj.id}] Connected to node (round {current_round}).")
             
             serialized_message = pickle.dumps({
                 "type": "frag_weights", 
@@ -787,15 +849,15 @@ def train_client(client_obj, metrics_tracker=None):
             })
             
             message_length = len(serialized_message)
-            print(f"[Client {client_obj.id}] Sending raw weights of size {message_length} bytes.")
+            print(f"[Client {client_obj.id}] Sending raw weights of size {message_length} bytes (round {current_round}).")
             
             client_socket.send(message_length.to_bytes(4, byteorder='big'))
             client_socket.send(serialized_message)
-            print(f"[Client {client_obj.id}] Successfully sent raw weights to node.")
+            print(f"[Client {client_obj.id}] Successfully sent raw weights to node (round {current_round}).")
             client_socket.close()
-            print(f"[Client {client_obj.id}] Connection closed with node.")
+            print(f"[Client {client_obj.id}] Connection closed with node (round {current_round}).")
         except Exception as e:
-            print(f"[Client {client_obj.id}] Error sending raw weights to node (non-clustering): {str(e)}")
+            print(f"[Client {client_obj.id}] Error sending raw weights to node (non-clustering, round {current_round}): {str(e)}")
 
     training_barrier.wait()
 
@@ -999,18 +1061,19 @@ if __name__ == "__main__":
 
     # Training rounds
     for round_i in range(settings['n_rounds']):
-        print(f"### ROUND {round_i + 1} ###")
+        current_fl_round = round_i + 1
+        print(f"### ROUND {current_fl_round} ###")
         
         if settings.get('use_clustering', False):
-            print(f"\nROUND {round_i + 1}: Clustering is ON. Generating clusters...")
-            metrics_tracker.measure_power(round_i + 1, "cluster_generation_start")
+            print(f"\nROUND {current_fl_round}: Clustering is ON. Generating clusters...")
+            metrics_tracker.measure_power(current_fl_round, "cluster_generation_start")
             cluster_generation([server], [node_clients], 
                               settings.get('min_number_of_clients_in_cluster', 3), 
                               1)
-            metrics_tracker.measure_power(round_i + 1, "cluster_generation_complete")
+            metrics_tracker.measure_power(current_fl_round, "cluster_generation_complete")
             # Log cluster information
             with open(settings['save_results'] + "output.txt", "a") as f:
-                f.write(f"\nROUND {round_i + 1}: Clustering is ON. Clusters formed:\n")
+                f.write(f"\nROUND {current_fl_round}: Clustering is ON. Clusters formed:\n")
                 for i, cluster in enumerate(server.clusters):
                     f.write(f"  Node {server.id} - Cluster {i+1}: {cluster}\n")
                     for client_id_in_cluster in cluster:
@@ -1019,33 +1082,31 @@ if __name__ == "__main__":
                             f.write(f"    Client {client_id_in_cluster} connections: {list(client_obj.connections.keys())}\n")
 
         with open(settings['save_results'] + "output.txt", "a") as f:
-            f.write(f"### ROUND {round_i + 1} ###\n")
+            f.write(f"### ROUND {current_fl_round} ###\n")
 
         # Training phase
-        print(f"\nROUND {round_i + 1}: Node 1 : Starting client training phase...\n")
-        metrics_tracker.measure_power(round_i + 1, "node_1_training_start")
+        print(f"\nROUND {current_fl_round}: Node 1 : Starting client training phase...\n")
+        metrics_tracker.measure_power(current_fl_round, "node_1_training_start")
         threads = []
         for client in node_clients.values():
-            t = threading.Thread(target=train_client, args=(client, metrics_tracker))
+            t = threading.Thread(target=train_client, args=(client, metrics_tracker, current_fl_round))
             t.start()
             threads.append(t)
     
         for t in threads:
             t.join()
-        metrics_tracker.measure_power(round_i + 1, "node_1_training_complete")
+        metrics_tracker.measure_power(current_fl_round, "node_1_training_complete")
 
         # Wait for all clients to finish and messages to be received
-        # This sleep is primarily for the NODE to receive messages from clients.
-        # Client-to-client fragment exchange should ideally complete within each train_client call (due to sum_weights timeout).
         wait_time_for_node = settings['ts'] 
-        print(f"\nROUND {round_i + 1}: All client training threads joined. Waiting {wait_time_for_node}s for node to receive messages...")
+        print(f"\nROUND {current_fl_round}: All client training threads joined. Waiting {wait_time_for_node}s for node to receive messages...")
         time.sleep(wait_time_for_node)
 
         # Aggregation phase
-        print(f"\nROUND {round_i + 1}: Starting aggregation phase on node...")
-        metrics_tracker.measure_power(round_i + 1, "aggregation_start")
-        server.create_global_model(None, round_i + 1)  # Pass None to use received_weights
-        metrics_tracker.measure_power(round_i + 1, "aggregation_complete")
+        print(f"\nROUND {current_fl_round}: Starting aggregation phase on node...")
+        metrics_tracker.measure_power(current_fl_round, "aggregation_start")
+        server.create_global_model(None, current_fl_round)  # Pass current_fl_round as index
+        metrics_tracker.measure_power(current_fl_round, "aggregation_complete")
 
         print("\nBroadcasting updated global model to clients...")
         time.sleep(settings['ts'] * 2)  # Wait for model distribution
