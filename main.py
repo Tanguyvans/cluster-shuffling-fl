@@ -8,6 +8,7 @@ import socket
 import json
 import sys
 import shutil
+import random
 
 from flwr.server.strategy.aggregate import aggregate
 from sklearn.model_selection import train_test_split
@@ -169,8 +170,8 @@ class Client:
 
     def train(self):
         if self.global_model_weights is None:
-            print(f"Warning: No global model weights for client {self.id}")
-            return None
+            print(f"[Client {self.id}] Warning: No global model weights for client {self.id}. Training cannot proceed.")
+            return None # Return None if training cannot start
 
         res, metrics = self.flower_client.fit(self.global_model_weights, self.id, {})
         test_metrics = self.flower_client.evaluate(res, {'name': f'Client {self.id}'})
@@ -182,14 +183,10 @@ class Client:
                 f"val: {metrics['val_loss']} {metrics['val_acc']} "
                 f"test: {test_metrics['test_loss']} {test_metrics['test_acc']}\n")
         
-        # Apply SMPC only if we have connections
-        if len(self.connections) > 0:
-            encrypted_lists, self.list_shapes = apply_smpc(res, len(self.connections) + 1, self.type_ss, self.threshold)
-            # Keep the last share for this client and send others
-            self.frag_weights.append(encrypted_lists.pop())
-            return encrypted_lists
-        else:
-            return None
+        # Always return the raw weights from training. 
+        # SMPC will be handled by the train_client function if clustering is enabled.
+        print(f"[Client {self.id}] Training complete. Returning raw weights to train_client function.")
+        return res 
 
     def send_frag_clients(self, frag_weights):
         for i, (k, v) in enumerate(self.connections.items()):
@@ -257,15 +254,58 @@ class Client:
 
     @property
     def sum_weights(self):
+        if not self.connections and not self.frag_weights: # Truly no connections and no frags (e.g. non-cluster mode called this by mistake)
+            print(f"\n[Client {self.id}] sum_weights called with no connections and no initial fragments. This should not happen in clustering.")
+            return None
+
+        # In clustering, client sends N-1 shares and keeps 1. So, it starts with 1 fragment in self.frag_weights.
+        # It expects to receive len(self.connections) fragments from its peers.
+        expected_total_fragments = len(self.connections) + 1 
+        
+        # If clustering is enabled but this client is in a "cluster of 1" (no connections)
+        # then expected_total_fragments will be 1. apply_smpc would have been called with N=1.
+        # self.frag_weights should contain its own (and only) share.
+        if expected_total_fragments == 1 and self.frag_weights: # Cluster of 1, should have its own share
+             print(f"\n[Client {self.id}] Operating in a cluster of 1. Using its own fragment.")
+             # sum_shares with a single fragment should ideally return that fragment itself if SMPC was for N=1
+             # or handle it as per the SMPC scheme's requirements for N=1.
+        elif len(self.frag_weights) < expected_total_fragments:
+            print(f"\n[Client {self.id}] Waiting for fragments. Have {len(self.frag_weights)}, expecting {expected_total_fragments} total.")
+            timeout_sum = 15  # seconds to wait for fragments
+            start_time_sum = time.time()
+            while len(self.frag_weights) < expected_total_fragments:
+                if time.time() - start_time_sum > timeout_sum:
+                    print(f"\n[Client {self.id}] TIMEOUT waiting for fragments. Have {len(self.frag_weights)}, expected {expected_total_fragments}. Cannot sum.")
+                    return None
+                # Log periodically, not too often
+                if int(time.time() - start_time_sum) % 2 == 0:
+                    print(f"[Client {self.id}] Still waiting for fragments... Have {len(self.frag_weights)}/{expected_total_fragments} (Elapsed: {time.time() - start_time_sum:.1f}s)")
+                time.sleep(0.2) # Short sleep
+
         if not self.frag_weights:
-            print(f"\n[Client {self.id}] No fragments to sum")
+            print(f"\n[Client {self.id}] No fragments available to sum, even after waiting period (if any).")
             return None
         
-        print(f"\n[Client {self.id}] Starting to sum {len(self.frag_weights)} fragments")
-        print(f"[Client {self.id}] Fragment sources: {[f'Fragment {i+1}' for i in range(len(self.frag_weights))]}")
-        summed_weights = sum_shares(self.frag_weights, self.type_ss)
-        print(f"[Client {self.id}] Successfully summed all fragments")
-        return summed_weights
+        print(f"\n[Client {self.id}] Proceeding to sum. Have {len(self.frag_weights)} fragments. Expected for sum: {expected_total_fragments} (for additive) or >= {self.threshold} (for threshold-based).")
+
+        # Check if the number of fragments is sufficient based on SMPC type and expectations.
+        if self.type_ss == 'additif':
+            if len(self.frag_weights) < expected_total_fragments:
+                print(f"\n[Client {self.id}] Additive SS: Not all expected fragments received. Have {len(self.frag_weights)}, expected {expected_total_fragments}. Cannot sum correctly.")
+                return None
+        elif len(self.frag_weights) < self.threshold: # For Shamir-like schemes
+                print(f"\n[Client {self.id}] Threshold SS: Not enough fragments to meet threshold. Have {len(self.frag_weights)}, need {self.threshold}.")
+                return None
+        
+        print(f"[Client {self.id}] Sufficient fragments gathered ({len(self.frag_weights)}). Type: {self.type_ss}. Starting sum_shares.")
+        
+        try:
+            summed_weights = sum_shares(self.frag_weights, self.type_ss)
+            print(f"[Client {self.id}] sum_shares completed successfully.")
+            return summed_weights
+        except Exception as e:
+            print(f"[Client {self.id}] Error during sum_shares: {e}")
+            return None
 
     def get_keys(self, private_key_path, public_key_path):
         # same
@@ -321,44 +361,51 @@ class Node:
         start_server(self.host, self.port, self.handle_message, self.id)
 
     def handle_message(self, client_socket):
-        # First, read the length of the data
-        data_length_bytes = client_socket.recv(4)
-        if not data_length_bytes:
-            return
-        data_length = int.from_bytes(data_length_bytes, byteorder='big')
+        try:
+            # First, read the length of the data
+            data_length_bytes = client_socket.recv(4)
+            if not data_length_bytes:
+                print("[Node] No data length received")
+                return
+            data_length = int.from_bytes(data_length_bytes, byteorder='big')
+            print(f"[Node] Received message length: {data_length} bytes")
 
-        # Now read exactly data_length bytes
-        data = b''
-        while len(data) < data_length:
-            packet = client_socket.recv(data_length - len(data))
-            if not packet:
-                break
-            data += packet
+            # Now read exactly data_length bytes
+            data = b''
+            while len(data) < data_length:
+                packet = client_socket.recv(data_length - len(data))
+                if not packet:
+                    print("[Node] Connection closed while receiving data")
+                    break
+                data += packet
 
-        if len(data) < data_length:
-            print("Data was truncated or connection was closed prematurely.")
-            return
+            if len(data) < data_length:
+                print(f"[Node] Data was truncated. Expected {data_length} bytes, got {len(data)} bytes")
+                return
 
-        message = pickle.loads(data)
-        message_type = message.get("type")
+            message = pickle.loads(data)
+            message_type = message.get("type")
+            print(f"[Node] Received message of type: {message_type}")
 
-        if message_type == "frag_weights":
-            client_id = message.get("id")
-            weights = pickle.loads(message.get("value"))
-            list_shapes = message.get("list_shapes")
-            
-            # Store the weights for aggregation
-            if not hasattr(self, 'received_weights'):
-                self.received_weights = []
-            self.received_weights.append((weights, 10))  # Add weight with sample count
-            
-            print(f"\n[Node {self.id}] Received weights from client {client_id}")
-            print(f"[Node {self.id}] Current received weights count: {len(self.received_weights)}")
-            print(f"[Node {self.id}] Total clients that have contributed: {', '.join([f'c0_{i+1}' for i in range(len(self.received_weights))])}")
-        else:
-            print("in else")
+            if message_type == "frag_weights":
+                client_id = message.get("id")
+                weights = pickle.loads(message.get("value"))
+                
+                # Store the weights for aggregation
+                if not hasattr(self, 'received_weights'):
+                    self.received_weights = []
+                self.received_weights.append((weights, 10))
+                
+                print(f"\n[Node {self.id}] Received weights from client {client_id}")
+                print(f"[Node {self.id}] Current received weights count: {len(self.received_weights)}")
+                print(f"[Node {self.id}] Total clients that have contributed: {', '.join([f'c0_{i+1}' for i in range(len(self.received_weights))])}")
+            else:
+                print(f"[Node] Unknown message type: {message_type}")
 
-        client_socket.close()
+        except Exception as e:
+            print(f"[Node] Error handling message: {str(e)}")
+        finally:
+            client_socket.close()
 
     def get_weights(self, len_dataset=10):
         # same
@@ -433,6 +480,16 @@ class Node:
             print(f"\n[Node {self.id}] Starting aggregation with {len(weights)} received weights")
             print(f"[Node {self.id}] Contributing clients: {', '.join([f'c0_{i+1}' for i in range(len(weights))])}")
         
+        # If still no weights, return without updating
+        if not weights:
+            print("\nNo weights received from clients. Keeping current global model.")
+            # Copy current global model for next round
+            filename = f"models/CFL/m{index}.npz"
+            shutil.copy2(self.global_params_directory, filename)
+            self.global_params_directory = filename
+            self.broadcast_model_to_clients(self.global_params_directory)
+            return
+
         useful_weights = []
         useful_clients = []
         not_useful_clients = []
@@ -581,33 +638,137 @@ class Node:
         return test_metrics['test_loss'], test_metrics['test_acc']
 
     def generate_clusters(self, min_clients_per_cluster):
-        """Generate clusters of clients"""
+        """Generate clusters of clients with shuffling"""
         # Get all client IDs
         client_ids = list(self.clients.keys())
         
-        # Simple clustering: create clusters of size min_clients_per_cluster
+        # Shuffle the client IDs randomly before forming clusters
+        random.shuffle(client_ids)
+        print(f"[Node {self.id}] Shuffled client IDs for new cluster generation: {client_ids}")
+
+        self.clusters = []
+        current_cluster = []
+        for client_id in client_ids:
+            current_cluster.append(client_id)
+            if len(current_cluster) >= min_clients_per_cluster:
+                # Check if adding more clients would still allow remaining clients to form a valid cluster
+                remaining_clients = len(client_ids) - (client_ids.index(client_id) + 1)
+                if remaining_clients < min_clients_per_cluster and remaining_clients > 0 :
+                    # If not enough remaining to form another full cluster, add to current if it doesn't make it too big
+                    # This logic is a bit more complex to ensure all clients are assigned if possible,
+                    # and clusters are not too imbalanced.
+                    # For a simpler approach, you can stick to the original slicing logic after shuffling.
+                    # The provided slicing logic after shuffle is simpler:
+                    pass # Original logic will be used below based on slicing the shuffled list
+                else:
+                    # Original logic for forming clusters with fixed sizes from the shuffled list
+                    pass
+
+
+        # Simpler logic for forming clusters after shuffling:
         self.clusters = []
         for i in range(0, len(client_ids), min_clients_per_cluster):
             cluster = client_ids[i:i + min_clients_per_cluster]
+            # Ensure the last cluster also meets the minimum size requirement, 
+            # or handle it (e.g., merge with a previous one, or allow smaller if it's the only way to include clients)
+            # For now, we'll only add it if it meets the minimum size.
             if len(cluster) >= min_clients_per_cluster:
                 self.clusters.append(cluster)
+            elif cluster: # Some remaining clients, less than min_clients_per_cluster
+                # Option: Add to the last formed cluster if it exists and won't become too large
+                # Option: Discard these clients for this round if strict cluster sizes are needed
+                # Option: Allow a smaller last cluster if that's acceptable
+                print(f"[Node {self.id}] INFO: Remaining clients {cluster} are fewer than min_clients_per_cluster ({min_clients_per_cluster}) and will not form a separate cluster this round with current logic.")
+                # To include them, you might append to the last cluster or handle differently based on requirements.
+
+        print(f"[Node {self.id}] Generated clusters: {self.clusters}")
 
 client_weights = []
 
 def train_client(client_obj, metrics_tracker=None):
+    # Train the model - client_obj.train() should now always return raw weights or None
+    print(f"[Client {client_obj.id}] Starting training...")
+    weights = client_obj.train() 
+
+    if weights is None:
+        print(f"[Client {client_obj.id}] Training returned no weights (possibly failed or no global model). Not sending anything.")
+        training_barrier.wait()
+        return
+
+    print(f"[Client {client_obj.id}] Training finished. Received raw weights of type: {type(weights)}")
+
     if settings.get('use_clustering', False):
-        # Get encrypted shares from training
-        frag_weights = client_obj.train()
-        if frag_weights is not None:  # Vérifier si l'entraînement a réussi
-            # Send shares to other clients in the cluster
-            client_obj.send_frag_clients(frag_weights)
+        print(f"[Client {client_obj.id}] Clustering ENABLED.")
+        if not client_obj.connections:
+            print(f"[Client {client_obj.id}] Clustering enabled, but client has NO connections (cluster of 1).")
+        
+        try:
+            print(f"[Client {client_obj.id}] Applying SMPC to raw weights for {len(client_obj.connections) + 1} shares...")
+            encrypted_lists, client_obj.list_shapes = apply_smpc(
+                weights, 
+                len(client_obj.connections) + 1,
+                client_obj.type_ss, 
+                client_obj.threshold
+            )
+            print(f"[Client {client_obj.id}] SMPC applied. Generated {len(encrypted_lists) +1} shares in total.")
+            
+            client_obj.frag_weights.append(encrypted_lists.pop()) # Keep one share
+            print(f"[Client {client_obj.id}] Kept 1 share for self. Sending {len(encrypted_lists)} share(s) to {len(client_obj.connections)} peer(s).")
+            if len(encrypted_lists) != len(client_obj.connections):
+                print(f"[Client {client_obj.id}] WARNING: Number of shares to send ({len(encrypted_lists)}) does not match number of connections ({len(client_obj.connections)}). This might be an issue if not a cluster of 1.")
+
+            if client_obj.connections: # Only send if there are actual connections
+                client_obj.send_frag_clients(encrypted_lists)
+            
+            print(f"[Client {client_obj.id}] Attempting to get summed weights (will trigger sum_weights property)...")
+            summed_w = client_obj.sum_weights 
+            
+            if summed_w is not None:
+                print(f"[Client {client_obj.id}] Successfully obtained summed weights. Proceeding to send to node.")
+                client_obj.send_frag_node() 
+                print(f"[Client {client_obj.id}] Call to send_frag_node completed (clustering).")
+            else:
+                print(f"[Client {client_obj.id}] Sum of fragments is None (e.g. timeout or insufficient frags). **SKIPPING send_frag_node (clustering).**")
+        except Exception as e:
+            print(f"[Client {client_obj.id}] Exception during clustering/SMPC process: {e}")
+            import traceback
+            traceback.print_exc()
     else:
-        # Regular FL training
-        weights = client_obj.train()
-        if weights is not None and metrics_tracker:  # Vérifier si l'entraînement a réussi
-            weights_size = sys.getsizeof(pickle.dumps(weights)) / (1024 * 1024)
-            metrics_tracker.record_protocol_communication(0, weights_size, "client-node")
-    
+        # Regular FL path - send weights directly to node
+        print(f"\n[Client {client_obj.id}] Clustering DISABLED. Preparing to send raw weights directly to node.")
+        try:
+            if metrics_tracker:
+                weights_size = sys.getsizeof(pickle.dumps(weights)) / (1024 * 1024)
+                metrics_tracker.record_protocol_communication(0, weights_size, "client-node")
+            
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            node_address = client_obj.node.get('address')
+            if not node_address:
+                print(f"[Client {client_obj.id}] Node address not set. Cannot send weights.")
+                training_barrier.wait()
+                return
+
+            print(f"[Client {client_obj.id}] Connecting to node at {node_address} to send raw weights.")
+            client_socket.connect(node_address)
+            print(f"[Client {client_obj.id}] Connected to node.")
+            
+            serialized_message = pickle.dumps({
+                "type": "frag_weights", 
+                "id": client_obj.id,
+                "value": pickle.dumps(weights) 
+            })
+            
+            message_length = len(serialized_message)
+            print(f"[Client {client_obj.id}] Sending raw weights of size {message_length} bytes.")
+            
+            client_socket.send(message_length.to_bytes(4, byteorder='big'))
+            client_socket.send(serialized_message)
+            print(f"[Client {client_obj.id}] Successfully sent raw weights to node.")
+            client_socket.close()
+            print(f"[Client {client_obj.id}] Connection closed with node.")
+        except Exception as e:
+            print(f"[Client {client_obj.id}] Error sending raw weights to node (non-clustering): {str(e)}")
+
     training_barrier.wait()
 
 def create_nodes(test_sets, number_of_nodes, save_results, check_usefulness, coef_useful, tolerance_ceil, **kwargs):
@@ -804,20 +965,27 @@ if __name__ == "__main__":
         print(f"### ROUND {round_i + 1} ###")
         
         if settings.get('use_clustering', False):
-            # Cluster generation phase
+            print(f"\nROUND {round_i + 1}: Clustering is ON. Generating clusters...")
             metrics_tracker.measure_power(round_i + 1, "cluster_generation_start")
             cluster_generation([server], [node_clients], 
-                              settings.get('min_number_of_clients_in_cluster', 3),  # Utiliser .get() avec une valeur par défaut
-                              1)  # We have 1 node in this case
+                              settings.get('min_number_of_clients_in_cluster', 3), 
+                              1)
             metrics_tracker.measure_power(round_i + 1, "cluster_generation_complete")
+            # Log cluster information
+            with open(settings['save_results'] + "output.txt", "a") as f:
+                f.write(f"\nROUND {round_i + 1}: Clustering is ON. Clusters formed:\n")
+                for i, cluster in enumerate(server.clusters):
+                    f.write(f"  Node {server.id} - Cluster {i+1}: {cluster}\n")
+                    for client_id_in_cluster in cluster:
+                        client_obj = node_clients.get(client_id_in_cluster)
+                        if client_obj:
+                            f.write(f"    Client {client_id_in_cluster} connections: {list(client_obj.connections.keys())}\n")
 
         with open(settings['save_results'] + "output.txt", "a") as f:
             f.write(f"### ROUND {round_i + 1} ###\n")
 
         # Training phase
-        print(f"Node 1 : Training\n")
-        
-        # Training phase
+        print(f"\nROUND {round_i + 1}: Node 1 : Starting client training phase...\n")
         metrics_tracker.measure_power(round_i + 1, "node_1_training_start")
         threads = []
         for client in node_clients.values():
@@ -829,51 +997,21 @@ if __name__ == "__main__":
             t.join()
         metrics_tracker.measure_power(round_i + 1, "node_1_training_complete")
 
-        if settings.get('use_clustering', False):
-            print(f"\nNode 1 : SMPC Phase")
-            
-            # SMPC phase
-            metrics_tracker.measure_power(round_i + 1, "node_1_smpc_start")
-            for cluster_idx, cluster in enumerate(server.clusters):
-                print(f"\n=== Processing Cluster {cluster_idx + 1} ===")
-                print(f"Cluster members: {', '.join(cluster)}")
-                cluster_weights = []  # Store weights for this cluster
-                
-                for client_id in cluster:
-                    if client_id in ['tot', 'count']:
-                        continue
-                    client = node_clients[client_id]
-                    print(f"\n[Cluster {cluster_idx + 1}] Processing client {client_id}")
-                    print(f"[Cluster {cluster_idx + 1}] Sending fragments from {client_id} to node")
-                    client.send_frag_node()
-                    
-                    # After sending fragments, get the summed weights
-                    if client.sum_weights is not None:
-                        cluster_weights.append(client.sum_weights)
-                        print(f"[Cluster {cluster_idx + 1}] Successfully added summed weights from {client_id}")
-                    else:
-                        print(f"[Cluster {cluster_idx + 1}] No summed weights available from {client_id}")
-                    time.sleep(5)
-
-                # If we have weights from this cluster, add them to client_weights
-                if cluster_weights:
-                    print(f"\n[Cluster {cluster_idx + 1}] Adding {len(cluster_weights)} weights to global weights")
-                    print(f"[Cluster {cluster_idx + 1}] Contributing clients: {', '.join(cluster)}")
-                    client_weights.extend(cluster_weights)
-                else:
-                    print(f"\n[Cluster {cluster_idx + 1}] No weights to add from this cluster")
-
-                time.sleep(settings['ts'])
-
-        time.sleep(settings['ts'])
+        # Wait for all clients to finish and messages to be received
+        # This sleep is primarily for the NODE to receive messages from clients.
+        # Client-to-client fragment exchange should ideally complete within each train_client call (due to sum_weights timeout).
+        wait_time_for_node = settings['ts'] 
+        print(f"\nROUND {round_i + 1}: All client training threads joined. Waiting {wait_time_for_node}s for node to receive messages...")
+        time.sleep(wait_time_for_node)
 
         # Aggregation phase
+        print(f"\nROUND {round_i + 1}: Starting aggregation phase on node...")
         metrics_tracker.measure_power(round_i + 1, "aggregation_start")
-        server.create_global_model(client_weights, round_i + 1)
+        server.create_global_model(None, round_i + 1)  # Pass None to use received_weights
         metrics_tracker.measure_power(round_i + 1, "aggregation_complete")
 
-        time.sleep(settings['ts'])
-        client_weights = []  # Reset client weights for next round
+        print("\nBroadcasting updated global model to clients...")
+        time.sleep(settings['ts'] * 2)  # Wait for model distribution
 
     # Final operations
     metrics_tracker.measure_global_power("complete")

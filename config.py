@@ -4,12 +4,12 @@ settings = {
     "pretrained": True,
     "patience": 3,
     "batch_size": 32,
-    "n_epochs": 2,
+    "n_epochs": 5,
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
 
-    "check_usefulness": True,
+    "check_usefulness": False,
     "coef_useful": 1.05,   # 1.05
     "tolerance_ceil": 0.08,
 
@@ -25,7 +25,7 @@ settings = {
     'use_clustering': False,
     "secret_sharing": "additif",  # "additif" or "shamir"
 
-    "diff_privacy": False,
+    "diff_privacy": True,
     "k": 3,
     "m": 3,
     "ts": 5,
