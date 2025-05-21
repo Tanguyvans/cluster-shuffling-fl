@@ -342,6 +342,7 @@ class Node:
         self.tolerance_ceil = tolerance_ceil
 
         self.metrics_tracker = metrics_tracker
+        self.received_weights_info = [] # Initialize to store (weights, num_examples, client_id)
 
         private_key_path = f"keys/{id}_private_key.pem"
         public_key_path = f"keys/{id}_public_key.pem"
@@ -368,7 +369,7 @@ class Node:
                 print("[Node] No data length received")
                 return
             data_length = int.from_bytes(data_length_bytes, byteorder='big')
-            print(f"[Node] Received message length: {data_length} bytes")
+            # print(f"[Node] Received message length: {data_length} bytes") # Reduced verbosity
 
             # Now read exactly data_length bytes
             data = b''
@@ -385,20 +386,21 @@ class Node:
 
             message = pickle.loads(data)
             message_type = message.get("type")
-            print(f"[Node] Received message of type: {message_type}")
+            # print(f"[Node] Received message of type: {message_type}") # Reduced verbosity
 
             if message_type == "frag_weights":
-                client_id = message.get("id")
-                weights = pickle.loads(message.get("value"))
+                client_id = message.get("id") # Actual client ID from message
+                weights = pickle.loads(message.get("value")) # Actual model parameters
                 
-                # Store the weights for aggregation
-                if not hasattr(self, 'received_weights'):
-                    self.received_weights = []
-                self.received_weights.append((weights, 10))
+                # Store as (parameters, num_examples_placeholder, actual_client_id)
+                self.received_weights_info.append((weights, 10, client_id)) 
                 
                 print(f"\n[Node {self.id}] Received weights from client {client_id}")
-                print(f"[Node {self.id}] Current received weights count: {len(self.received_weights)}")
-                print(f"[Node {self.id}] Total clients that have contributed: {', '.join([f'c0_{i+1}' for i in range(len(self.received_weights))])}")
+                print(f"[Node {self.id}] Current received weights count: {len(self.received_weights_info)}")
+                
+                # Corrected logging for contributors:
+                contributing_clients_actual_ids = [info[2] for info in self.received_weights_info]
+                print(f"[Node {self.id}] Total clients that have contributed so far this round: {', '.join(sorted(contributing_clients_actual_ids))}")
             else:
                 print(f"[Node] Unknown message type: {message_type}")
 
@@ -473,90 +475,109 @@ class Node:
 
         self.broadcast_model_to_clients(filename)
 
-    def create_global_model(self, weights, index, two_step=False):
-        # If no weights provided, use received weights
-        if not weights and hasattr(self, 'received_weights'):
-            weights = [w for w, _ in self.received_weights]
-            print(f"\n[Node {self.id}] Starting aggregation with {len(weights)} received weights")
-            print(f"[Node {self.id}] Contributing clients: {', '.join([f'c0_{i+1}' for i in range(len(weights))])}")
-        
-        # If still no weights, return without updating
-        if not weights:
-            print("\nNo weights received from clients. Keeping current global model.")
-            # Copy current global model for next round
+    def create_global_model(self, models_arg, index, two_step=False):
+        processing_list = []  # This will hold tuples of (client_weight_params, client_num_examples, original_client_id)
+
+        if models_arg:
+            # If models are passed directly, create placeholder IDs and default num_examples
+            # This path is not typically taken by the main training loop for client aggregation
+            processing_list = [(model_params, 10, f"direct_model_{i}") for i, model_params in enumerate(models_arg)]
+            print(f"\n[Node {self.id}] Processing {len(processing_list)} models passed directly as argument for round {index}.")
+        elif self.received_weights_info:
+            # Use weights received from clients
+            processing_list = self.received_weights_info
+            print(f"\n[Node {self.id}] Starting aggregation for round {index} with {len(processing_list)} received client models.")
+            actual_client_ids = [info[2] for info in processing_list] # info is (weights, num_ex, client_id)
+            print(f"[Node {self.id}] Contributing clients: {', '.join(sorted(actual_client_ids))}")
+        else:
+            # No models passed as argument and no models received from clients
+            processing_list = []
+
+        if not processing_list:
+            print(f"\n[Node {self.id}] No client models to process for round {index}. Keeping current global model.")
             filename = f"models/CFL/m{index}.npz"
-            shutil.copy2(self.global_params_directory, filename)
-            self.global_params_directory = filename
+            if os.path.exists(self.global_params_directory):
+                shutil.copy2(self.global_params_directory, filename)
+                self.global_params_directory = filename
+            else: # Should not happen if create_first_global_model was called
+                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory}")
+                # Potentially create a new initial model or handle error
+                self.create_first_global_model() # Fallback, creates m0.npz, then broadcast. This might not be m{index}.npz
+                # For safety, let's ensure it saves as m{index}.npz if it's a fallback here.
+                if self.global_params_directory != filename: # If create_first_global_model saved as m0
+                     shutil.copy2(self.global_params_directory, filename)
+                     self.global_params_directory = filename
+
             self.broadcast_model_to_clients(self.global_params_directory)
+            self.received_weights_info = [] # Clear received weights for the next round
             return
 
-        useful_weights = []
-        useful_clients = []
-        not_useful_clients = []
+        useful_weights_for_agg = [] # List of (weight_param_object, num_examples)
+        useful_client_ids_log = []
+        not_useful_client_ids_log = []
 
-        # Charger le modèle global actuel pour comparaison
+        # Load current global model for comparison
         global_weights_dict = np.load(self.global_params_directory)
-        global_weights = [val for name, val in global_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
+        global_weights_params = [val for name, val in global_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
         
-        # Pour chaque modèle client
-        for i, client_weights in enumerate(weights):
-            client_id = f"c0_{i + 1}"  # Format du client ID basé sur la création des clients
+        # For each client model received/passed
+        for client_weight_params, client_num_examples, original_client_id in processing_list:
             if self.check_usefulness:
                 # Sauvegarder temporairement le modèle client pour évaluation
-                temp_filename = f"models/CFL/temp_client_{i}_round_{index}.npz"
+                temp_filename = f"models/CFL/temp_{original_client_id}_round_{index}.npz" # Use actual client_id
                 
-                self.flower_client.set_parameters(client_weights)
+                self.flower_client.set_parameters(client_weight_params)
                 temp_weights_dict = self.flower_client.get_dict_params({})
-                temp_weights_dict['len_dataset'] = 0
+                temp_weights_dict['len_dataset'] = client_num_examples # Use actual num_examples or 0 if not meaningful
                 
                 with open(temp_filename, "wb") as fi:
                     np.savez(fi, **temp_weights_dict)
 
                 # Vérifier si le modèle est utile
-                if self.is_update_useful(temp_filename, list(self.clients.keys())):
-                    useful_weights.append((client_weights, 10))
-                    useful_clients.append(client_id)
+                if self.is_update_useful(temp_filename, list(self.clients.keys())): # participants for is_update_useful are all clients of node
+                    useful_weights_for_agg.append((client_weight_params, client_num_examples))
+                    useful_client_ids_log.append(original_client_id)
                 else:
-                    not_useful_clients.append(client_id)
+                    not_useful_client_ids_log.append(original_client_id)
                     
                 # Nettoyer le fichier temporaire
                 os.remove(temp_filename)
-            else:
-                useful_weights.append((client_weights, 10))
-                useful_clients.append(client_id)
+            else: # Not checking usefulness
+                useful_weights_for_agg.append((client_weight_params, client_num_examples))
+                useful_client_ids_log.append(original_client_id)
 
         # Afficher le résumé des modèles utiles et non utiles
         print(f"\n=== Round {index} Model Usefulness Summary ===")
-        print(f"Total clients: {len(weights)}")
-        print(f"Useful models ({len(useful_clients)}): {', '.join(useful_clients)}")
-        print(f"Not useful models ({len(not_useful_clients)}): {', '.join(not_useful_clients)}")
+        print(f"Total client models considered: {len(processing_list)}")
+        print(f"Useful models ({len(useful_client_ids_log)}): {', '.join(sorted(useful_client_ids_log))}")
+        print(f"Not useful models ({len(not_useful_client_ids_log)}): {', '.join(sorted(not_useful_client_ids_log))}")
         print("=======================================\n")
 
         # Écrire le résumé dans le fichier de sortie
         with open(self.save_results + "output.txt", "a") as fi:
             fi.write(f"\n=== Round {index} Model Usefulness Summary ===\n")
-            fi.write(f"Total clients: {len(weights)}\n")
-            fi.write(f"Useful models ({len(useful_clients)}): {', '.join(useful_clients)}\n")
-            fi.write(f"Not useful models ({len(not_useful_clients)}): {', '.join(not_useful_clients)}\n")
+            fi.write(f"Total client models considered: {len(processing_list)}\n")
+            fi.write(f"Useful models ({len(useful_client_ids_log)}): {', '.join(sorted(useful_client_ids_log))}\n")
+            fi.write(f"Not useful models ({len(not_useful_client_ids_log)}): {', '.join(sorted(not_useful_client_ids_log))}\n")
             fi.write("=======================================\n")
 
-        if len(useful_weights) > 0:
-            print(f"\n[Node {self.id}] Starting final aggregation")
-            print(f"[Node {self.id}] Number of useful models: {len(useful_weights)}")
-            print(f"[Node {self.id}] Useful models from clients: {', '.join(useful_clients)}")
+        if len(useful_weights_for_agg) > 0:
+            print(f"\n[Node {self.id}] Starting final aggregation with {len(useful_weights_for_agg)} useful client models.")
+            print(f"[Node {self.id}] Useful models from clients: {', '.join(sorted(useful_client_ids_log))}")
             
             # Ajouter le modèle global avec un poids plus important
-            useful_weights.append((global_weights, 20))
-            print(f"[Node {self.id}] Added global model to aggregation")
+            # The num_examples (20) for global_weights_params is a weighting factor for aggregation
+            useful_weights_for_agg.append((global_weights_params, 20)) 
+            print(f"[Node {self.id}] Added current global model to the aggregation set (effective models for agg: {len(useful_weights_for_agg)}).")
             
             # Agréger les modèles utiles
-            aggregated_weights = aggregate(useful_weights)
-            print(f"[Node {self.id}] Completed aggregation of all weights")
+            aggregated_weights = aggregate(useful_weights_for_agg) # aggregate expects list of (parameters, num_examples)
+            print(f"[Node {self.id}] Completed aggregation of useful models and global model.")
             metrics = self.flower_client.evaluate(aggregated_weights, {})
 
             self.flower_client.set_parameters(aggregated_weights)
             weights_dict = self.flower_client.get_dict_params({})
-            weights_dict['len_dataset'] = 0
+            weights_dict['len_dataset'] = 0 # Or sum of num_examples? For now, 0 as in original.
 
             filename = f"models/CFL/m{index}.npz"
             self.global_params_directory = filename
@@ -569,19 +590,26 @@ class Node:
                 np.savez(fi, **weights_dict)
 
             with open(self.save_results + "output.txt", "a") as fi:
-                fi.write(f"Round {index}, Global aggregation: {metrics}\n")
+                fi.write(f"Round {index}, Global aggregation after usefulness check: {metrics}\n")
         else:
-            print("\nNo useful models found. Keeping current global model.")
+            print(f"\n[Node {self.id}] No useful client models found for round {index}. Keeping current global model.")
             # Copier le modèle global actuel pour le prochain round
             filename = f"models/CFL/m{index}.npz"
-            shutil.copy2(self.global_params_directory, filename)
-            self.global_params_directory = filename
+            if os.path.exists(self.global_params_directory):
+                shutil.copy2(self.global_params_directory, filename)
+                self.global_params_directory = filename
+            else: # Should not happen
+                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory} when no useful models.")
+                self.create_first_global_model() # Fallback
+                if self.global_params_directory != filename:
+                     shutil.copy2(self.global_params_directory, filename)
+                     self.global_params_directory = filename
+
 
         self.broadcast_model_to_clients(self.global_params_directory)
 
-        # Clear received weights after aggregation
-        if hasattr(self, 'received_weights'):
-            self.received_weights = []
+        # Clear received weights_info for the next round
+        self.received_weights_info = []
 
     def get_keys(self, private_key_path, public_key_path):
         # same

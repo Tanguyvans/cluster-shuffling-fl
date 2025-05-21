@@ -4,7 +4,7 @@ settings = {
     "pretrained": True,
     "patience": 3,
     "batch_size": 32,
-    "n_epochs": 5,
+    "n_epochs": 2,
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
