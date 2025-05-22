@@ -308,28 +308,70 @@ def demo_with_converted_model(argv):
         # Get the data
         (X_train, y_train), (X_test, y_test) = get_data()
         
-        # Evaluate on test set
-        print("\nEvaluating model on test set...")
-        test_loss, test_accuracy = converted_model.evaluate(X_test, y_test, verbose=1)
-        print(f"\nTest accuracy: {test_accuracy:.4f}")
-        print(f"Test loss: {test_loss:.4f}")
+        # Train the shadow models
+        print("Training the shadow models...")
+        smb = ShadowModelBundle(
+            target_model_fn,
+            shadow_dataset_size=SHADOW_DATASET_SIZE,
+            num_models=FLAGS.num_shadows,
+        )
         
-        # Get predictions for confusion matrix
-        y_pred = converted_model.predict(X_test)
-        y_pred_classes = np.argmax(y_pred, axis=1)
-        y_true_classes = np.argmax(y_test, axis=1)
+        # Split data for shadow models
+        attacker_X_train, attacker_X_test, attacker_y_train, attacker_y_test = train_test_split(
+            X_test, y_test, test_size=0.1, stratify=y_test
+        )
         
-        # Calculate per-class accuracy
-        class_accuracy = {}
-        for i in range(NUM_CLASSES):
-            mask = y_true_classes == i
-            if np.sum(mask) > 0:  # Avoid division by zero
-                class_acc = np.mean(y_pred_classes[mask] == y_true_classes[mask])
-                class_accuracy[i] = class_acc
+        # Train shadow models
+        X_shadow, y_shadow = smb.fit_transform(
+            attacker_X_train,
+            attacker_y_train,
+            fit_kwargs=dict(
+                epochs=FLAGS.target_epochs,
+                verbose=1,
+                validation_data=(attacker_X_test, attacker_y_test),
+                batch_size=32
+            ),
+        )
         
-        print("\nPer-class accuracy:")
-        for class_idx, acc in class_accuracy.items():
-            print(f"Class {class_idx}: {acc:.4f}")
+        # Initialize and train attack model
+        print("Training the attack model...")
+        amb = AttackModelBundle(attack_model_fn, num_classes=NUM_CLASSES)
+        amb.fit(
+            X_shadow, y_shadow,
+            fit_kwargs=dict(
+                epochs=FLAGS.attack_epochs,
+                verbose=1,
+                batch_size=32
+            )
+        )
+        
+        # Prepare attack data
+        print("Preparing attack data for evaluation...")
+        data_in = X_train[:ATTACK_TEST_DATASET_SIZE], y_train[:ATTACK_TEST_DATASET_SIZE]
+        data_out = X_test[:ATTACK_TEST_DATASET_SIZE], y_test[:ATTACK_TEST_DATASET_SIZE]
+        
+        # Create a wrapper for the converted model that provides predict_proba
+        class ModelWrapper:
+            def __init__(self, model):
+                self.model = model
+            
+            def predict_proba(self, X):
+                return self.model.predict(X)
+        
+        # Use the wrapper instead of KerasClassifier
+        target_model = ModelWrapper(converted_model)
+        
+        # Prepare attack data
+        attack_test_data, real_membership_labels = prepare_attack_data(
+            target_model, data_in, data_out
+        )
+        
+        # Make attack predictions
+        print("Making attack predictions...")
+        attack_guesses = amb.predict(attack_test_data)
+        attack_accuracy = np.mean(attack_guesses == real_membership_labels)
+        
+        print(f"Attack Accuracy: {attack_accuracy}")
         
     except Exception as e:
         print(f"Error in demo_with_converted_model: {e}")

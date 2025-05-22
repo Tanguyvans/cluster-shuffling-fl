@@ -8,7 +8,7 @@ NUM_CLASSES = 10
 WIDTH = 32
 HEIGHT = 32
 CHANNELS = 3
-EPOCHS = 5
+EPOCHS = 20
 BATCH_SIZE = 32
 
 def get_data():
