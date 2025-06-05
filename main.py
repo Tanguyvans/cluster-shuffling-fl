@@ -742,7 +742,7 @@ def train_client(client_obj, metrics_tracker=None, current_round=0):
 
     print(f"[Client {client_obj.id}] Training finished for round {current_round}. Received raw weights of type: {type(weights)}")
 
-    if settings.get('use_clustering', False):
+    if settings.get('clustering', False):
         print(f"[Client {client_obj.id}] Clustering ENABLED for round {current_round}.")
         if not client_obj.connections:
             print(f"[Client {client_obj.id}] Clustering enabled, but client has NO connections (cluster of 1) for round {current_round}.")
@@ -1064,7 +1064,7 @@ if __name__ == "__main__":
         current_fl_round = round_i + 1
         print(f"### ROUND {current_fl_round} ###")
         
-        if settings.get('use_clustering', False):
+        if settings.get('clustering', False):
             print(f"\nROUND {current_fl_round}: Clustering is ON. Generating clusters...")
             metrics_tracker.measure_power(current_fl_round, "cluster_generation_start")
             cluster_generation([server], [node_clients], 

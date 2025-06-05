@@ -27,7 +27,14 @@ class FlowerClient(fl.client.NumPyClient):
         self.batch_size = batch_size
         self.epochs = epochs
         self.model_choice = model_choice
+        
+        # Force disable DP if explicitly set to False
         self.dp = dp
+        if not dp:
+            print(f"FlowerClient: Differential Privacy DISABLED for {model_choice}")
+        else:
+            print(f"FlowerClient: Differential Privacy ENABLED for {model_choice}")
+            
         self.delta = delta
         self.epsilon = epsilon
         self.max_grad_norm = max_grad_norm

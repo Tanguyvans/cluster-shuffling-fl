@@ -17,7 +17,9 @@ def encrypt_tensor(secret, n_shares=3):
     :param n_shares: the number of parts to divide the secret (so the number of participants)
     :return: the list of shares for each client where each share is a tensor of values
     """
-    shares = [np.random.randint(-5, 5, size=secret.shape) for _ in range(n_shares - 1)]
+    # FIX: Use same data type as secret, and appropriate range for model weights
+    # Model weights are typically in range [-1, 1], so random shares should be similar
+    shares = [np.random.uniform(-0.1, 0.1, size=secret.shape).astype(secret.dtype) for _ in range(n_shares - 1)]
 
     # The last part is deduced from the sum of the previous parts to guarantee additivity
     shares.append(secret - sum(shares))

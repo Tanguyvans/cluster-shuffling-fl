@@ -49,34 +49,33 @@ def get_data():
     return (X_train, y_train), (X_test, y_test)
 
 
-def create_keras_model():
-    """The architecture of the target (victim) model.
-    This function will be passed to KerasClassifier.
-    """
-    model = tf.keras.models.Sequential()
-    model.add(layers.Conv2D(32, (3, 3), activation="relu", padding="same", input_shape=(WIDTH, HEIGHT, CHANNELS)))
-    model.add(layers.Conv2D(32, (3, 3), activation="relu"))
-    model.add(layers.MaxPooling2D(pool_size=(2, 2)))
-    model.add(layers.Dropout(0.25))
-    model.add(layers.Conv2D(64, (3, 3), activation="relu", padding="same"))
-    model.add(layers.Conv2D(64, (3, 3), activation="relu"))
-    model.add(layers.MaxPooling2D(pool_size=(2, 2)))
-    model.add(layers.Dropout(0.25))
-    model.add(layers.Flatten())
-    model.add(layers.Dense(512, activation="relu"))
-    model.add(layers.Dropout(0.5))
-    model.add(layers.Dense(NUM_CLASSES, activation="softmax"))
-    # Compilation is handled by KerasClassifier or can be done here
-    # model.compile("adam", loss="categorical_crossentropy", metrics=["accuracy"]) # Optional here
+def create_simplenet_model():
+    """Create SimpleNet model that matches the target architecture."""
+    model = tf.keras.Sequential([
+        # Conv1
+        layers.Conv2D(6, (5, 5), activation='relu', padding='valid', input_shape=(32, 32, 3)),
+        layers.MaxPooling2D((2, 2)),
+        
+        # Conv2
+        layers.Conv2D(16, (5, 5), activation='relu', padding='valid'),
+        layers.MaxPooling2D((2, 2)),
+        
+        # Flatten
+        layers.Flatten(),
+        
+        # FC layers
+        layers.Dense(120, activation='relu'),
+        layers.Dense(84, activation='relu'),
+        layers.Dense(10, activation='softmax')
+    ])
     return model
 
 
 def target_model_fn():
-    """Returns a Keras model wrapped in a scikit-learn compatible interface."""
-    # KerasClassifier will handle compilation if loss and optimizer are provided.
-    # It automatically provides fit, predict, predict_proba.
+    """Returns a SimpleNet model wrapped in a scikit-learn compatible interface."""
+    # Use the same architecture as the target model
     model = KerasClassifier(
-        model=create_keras_model, # Pass the function that creates the Keras model
+        model=create_simplenet_model, # Use SimpleNet architecture instead
         loss="categorical_crossentropy",
         optimizer="adam",
         metrics=["accuracy"],
@@ -212,7 +211,7 @@ def demo(argv):
     # Let's adjust how target_model is created and trained for clarity with KerasClassifier
     # The KerasClassifier is stateful after fit.
     target_model = KerasClassifier(
-        model=create_keras_model,
+        model=create_simplenet_model,
         loss="categorical_crossentropy",
         optimizer="adam",
         metrics=["accuracy"],
@@ -295,7 +294,7 @@ def demo_with_converted_model(argv):
     del argv  # Unused.
 
     # Load and convert your PyTorch model
-    model_path = "/Users/tanguyvans/Desktop/umons/cluster-shuffling-fl/trained_models/trained_model.npz"
+    model_path = "results/CFL/global_models/node_n1_round_5_global_model.npz"
     
     try:
         # First, let's inspect the .npz file

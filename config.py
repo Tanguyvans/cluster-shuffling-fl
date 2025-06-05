@@ -4,7 +4,7 @@ settings = {
     "pretrained": True,
     "patience": 3,
     "batch_size": 32,
-    "n_epochs": 2,
+    "n_epochs": 10,
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
@@ -14,23 +14,28 @@ settings = {
     "tolerance_ceil": 0.08,
 
     "poisoned_number": 0,
-    "n_rounds": 5,
+    "n_rounds": 10,
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
-    "lr": 0.001,
-    "choice_scheduler": "StepLR",  # "StepLR" or None
+    "lr": 0.001,              # Back to original LR
+    "choice_scheduler": "StepLR",  # Re-enable StepLR to test the fix
     "step_size": 3,
     "gamma": 0.5,
 
-    'use_clustering': True,
-    "secret_sharing": "additif",  # "additif" or "shamir"
+    "diff_privacy": False,
+    "noise_multiplier": 0.1,  
+    "max_grad_norm": 0.5,     
+    "delta": 1e-5,
+    "epsilon": 5.0,           
 
-    "diff_privacy": True,
-    "dp_epsilon": 1.0,  # Epsilon for differential privacy
-    "dp_delta": 1e-5,  # Delta for differential privacy
-    "dp_max_grad_norm": 1.2,  # Max gradient norm for differential privacy
-    "dp_noise_multiplier": 1.0, # Noise multiplier for differential privacy
-    "k": 3,
+    "clustering": True,       # RE-ENABLE MPC - Testing the fix!
+    "type_ss": "additif",
+    "threshold": 3,
     "m": 3,
-    "ts": 5,
+    "ts": 5,                  
+
+    "save_figure": True,
+    "matrix_path": "results/CFL/matrix_path",
+    "roc_path": "results/CFL/roc_path",
+    "pretrained": True,
 }
