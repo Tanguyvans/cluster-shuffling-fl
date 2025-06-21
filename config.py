@@ -28,7 +28,7 @@ settings = {
     "delta": 1e-5,
     "epsilon": 5.0,           
 
-    "clustering": True,       # RE-ENABLE MPC - Testing the fix!
+    "clustering": False,       # RE-ENABLE MPC - Testing the fix!
     "type_ss": "additif",
     "threshold": 3,
     "m": 3,

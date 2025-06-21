@@ -294,7 +294,7 @@ def demo_with_converted_model(argv):
     del argv  # Unused.
 
     # Load and convert your PyTorch model
-    model_path = "results/CFL/global_models/node_n1_round_5_global_model.npz"
+    model_path = "results/CFL/global_models/node_n1_round_10_global_model.npz"
     
     try:
         # First, let's inspect the .npz file

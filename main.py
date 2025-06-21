@@ -742,6 +742,32 @@ def train_client(client_obj, metrics_tracker=None, current_round=0):
 
     print(f"[Client {client_obj.id}] Training finished for round {current_round}. Received raw weights of type: {type(weights)}")
 
+    # Save client model for this round in .npz format
+    client_round_model_dir = os.path.join(settings['save_client_models'], "round_models")
+    os.makedirs(client_round_model_dir, exist_ok=True)
+    
+    client_round_model_path = os.path.join(client_round_model_dir, f"{client_obj.id}_round_{current_round}_model.npz")
+    
+    try:
+        # Convert weights to numpy format and save as .npz
+        if isinstance(weights, list):
+            # weights is a list of numpy arrays (standard format from FlowerClient)
+            weights_dict = {}
+            for i, weight_array in enumerate(weights):
+                weights_dict[f'param_{i}'] = weight_array
+        else:
+            # weights might be in different format, handle accordingly
+            weights_dict = {'weights': weights}
+        
+        with open(client_round_model_path, "wb") as fi:
+            np.savez(fi, **weights_dict)
+        print(f"[Client {client_obj.id}] Saved round {current_round} model to {client_round_model_path}")
+        
+    except Exception as e:
+        print(f"[Client {client_obj.id}] Error saving round model: {e}")
+        import traceback
+        traceback.print_exc()
+
     if settings.get('clustering', False):
         print(f"[Client {client_obj.id}] Clustering ENABLED for round {current_round}.")
         if not client_obj.connections:
@@ -883,8 +909,13 @@ def create_clients(train_sets, test_sets, node, number_of_clients, save_results,
     dict_clients = {}
     for num_client in range(number_of_clients):
         dataset_index = node * number_of_clients + num_client
+        client_id = f"c{node}_{num_client + 1}"
+        
+        # Create individual client model save path in .npz format
+        client_model_path = os.path.join(settings['save_client_models'], f"{client_id}_best_model.npz")
+        
         client_kwargs = {
-            'id': f"c{node}_{num_client + 1}",
+            'id': client_id,
             'host': "127.0.0.1",
             'port': 9000 + (node * number_of_clients) + num_client,  # Changed port calculation
             'train': train_sets[dataset_index],
@@ -892,6 +923,9 @@ def create_clients(train_sets, test_sets, node, number_of_clients, save_results,
             'save_results': save_results,
             **kwargs
         }
+        
+        # Override save_model with client-specific .npz path
+        client_kwargs['save_model'] = client_model_path
         
         # Only add secret sharing parameters if they exist in settings
         if 'secret_sharing' in settings:
@@ -915,7 +949,7 @@ def create_clients(train_sets, test_sets, node, number_of_clients, save_results,
         # Set metrics_tracker after client creation
         client.metrics_tracker = metrics_tracker
         
-        dict_clients[f"c{node}_{num_client + 1}"] = client
+        dict_clients[client_id] = client
 
     return dict_clients
 

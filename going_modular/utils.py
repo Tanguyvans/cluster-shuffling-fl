@@ -18,6 +18,7 @@ def initialize_parameters(settings, training_approach):
     settings["matrix_path"] = None  # "matrix"
     settings["save_results"] = f"results/{training_approach}/"
     settings["save_model"] = f"models/{training_approach}/"
+    settings["save_client_models"] = f"{settings['save_results']}client_models/"
 
     # clients
     training_barrier = threading.Barrier(settings['number_of_clients_per_node'])
@@ -40,6 +41,8 @@ def initialize_parameters(settings, training_approach):
               "\tNumber of Clients per Cluster: ", settings["min_number_of_clients_in_cluster"], "\n")
 
     os.makedirs(settings["save_results"], exist_ok=True)
+    os.makedirs(settings["save_model"], exist_ok=True)
+    os.makedirs(settings["save_client_models"], exist_ok=True)
     return training_barrier, None
 
 def sMAPE(outputs, targets):
