@@ -1,4 +1,4 @@
-/__pycache__
+*__pycache__
 /env
 /models
 /keys
@@ -6,3 +6,6 @@
 /Data
 /trained_models
 trained_models.npz
+/cluster_shuffling_env
+.env
+*.pyc

@@ -37,5 +37,4 @@ settings = {
     "save_figure": True,
     "matrix_path": "results/CFL/matrix_path",
     "roc_path": "results/CFL/roc_path",
-    "pretrained": True,
 }
