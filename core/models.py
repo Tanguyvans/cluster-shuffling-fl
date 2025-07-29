@@ -242,6 +242,7 @@ class ShuffleNet(nn.Module):
             return out, features
         else:
             return self.model(x)
+
 class Net(nn.Module):
     """
     This is a generic class to choose the architecture of the model.
