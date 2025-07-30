@@ -2,7 +2,9 @@ import os
 import threading
 
 def initialize_parameters(settings, training_approach):
-    settings["data_root"] = "Data"
+    # Don't override data_root if it's already set in config
+    if "data_root" not in settings:
+        settings["data_root"] = "Data"
     settings["roc_path"] = None  # "roc"
     settings["matrix_path"] = None  # "matrix"
     settings["save_results"] = f"results/{training_approach}/"

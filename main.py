@@ -20,13 +20,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from federated import Client, Node, FlowerClient, create_nodes, create_clients, cluster_generation, train_client
 from security import apply_smpc, sum_shares, data_poisoning
 from utils import initialize_parameters
-from Data import load_dataset
+from data import load_dataset
 from config import settings
 
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
-from metrics import MetricsTracker
+from utils.system_metrics import MetricsTracker
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -90,7 +90,8 @@ if __name__ == "__main__":
         matrix_path=settings['matrix_path'],
         roc_path=settings['roc_path'],
         pretrained=settings['pretrained'],
-        save_model=settings['save_model']
+        save_model=settings['save_model'],
+        input_size=(128, 128) if 'ffhq' in settings['name_dataset'].lower() else (32, 32)
     )[0]
     metrics_tracker.measure_power(0, "server_creation_complete")
 
@@ -119,7 +120,8 @@ if __name__ == "__main__":
         roc_path=settings['roc_path'],
         patience=settings['patience'],
         pretrained=settings['pretrained'],
-        save_model=settings['save_model']
+        save_model=settings['save_model'],
+        input_size=(128, 128) if 'ffhq' in settings['name_dataset'].lower() else (32, 32)
     )
     metrics_tracker.measure_power(0, "clients_creation_complete")
 

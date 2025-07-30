@@ -5,9 +5,9 @@ from opacus import PrivacyEngine
 from opacus.validators import ModuleValidator
 from opacus.data_loader import DPDataLoader
 
-from core.models import Net
+from models import Net
 
-from Data.loaders import TensorDataset, DataLoader
+from data.loaders import TensorDataset, DataLoader
 from utils.device import choice_device
 from utils.optimization import fct_loss, choice_optimizer_fct, choice_scheduler_fct
 from utils.visualization import save_graphs, save_matrix, save_roc
@@ -24,7 +24,7 @@ class FlowerClient(fl.client.NumPyClient):
                  learning_rate=0.001, choice_loss="cross_entropy", choice_optimizer="Adam", choice_scheduler=None,
                  step_size=5, gamma=0.1,
                  save_figure=None, matrix_path=None, roc_path=None, patience=2, pretrained=True, save_model=None,
-                 type_ss="additif", threshold=3, m=3, noise_multiplier=1.0):
+                 type_ss="additif", threshold=3, m=3, noise_multiplier=1.0, input_size=(32, 32)):
 
         self.batch_size = batch_size
         self.epochs = epochs
@@ -58,8 +58,8 @@ class FlowerClient(fl.client.NumPyClient):
         self.frag_weights = []
         self.connections = {}
 
-        # Initialize model
-        model = Net(num_classes=len(self.classes), arch=self.model_choice, pretrained=pretrained)
+        # Initialize model with provided input size
+        model = Net(num_classes=len(self.classes), arch=self.model_choice, pretrained=pretrained, input_size=input_size)
         
         # Validate model for differential privacy if dp is enabled
         if self.dp:

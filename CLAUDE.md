@@ -38,8 +38,17 @@ This is a privacy-preserving federated learning framework implementing cluster s
 The codebase has been restructured for better organization:
 
 ```
-├── core/                    # Core ML components
-│   ├── models.py           # Neural network architectures (SimpleNet, ResNet18, etc.)
+├── models/                 # Neural network architectures
+│   ├── architectures/      # Individual model implementations
+│   │   ├── simple_net.py   # SimpleNet CNN
+│   │   ├── resnet.py       # ResNet variants (18, 34, 50, 101, 152)
+│   │   ├── mobilenet.py    # MobileNet V2
+│   │   ├── efficient_net.py # EfficientNet B0/B4
+│   │   ├── squeeze_net.py  # SqueezeNet
+│   │   └── shuffle_net.py  # ShuffleNet variants
+│   ├── factory.py          # Net class for architecture selection
+│   └── pretrained/         # Saved model files
+├── core/                   # Core ML components
 │   └── training.py         # Training/evaluation loops with early stopping
 ├── data/                   # Data handling
 │   └── loaders.py          # Dataset loading, partitioning, normalization
@@ -56,6 +65,7 @@ The codebase has been restructured for better organization:
 │   ├── config.py          # Parameter initialization 
 │   ├── device.py          # Device selection (CPU/GPU/MPS)
 │   ├── metrics.py         # Performance metrics (sMAPE)
+│   ├── system_metrics.py  # System monitoring (MetricsTracker)
 │   ├── optimization.py    # Loss functions, optimizers, schedulers
 │   ├── visualization.py   # Plotting, ROC curves, confusion matrices
 │   └── model_utils.py     # Model parameter handling

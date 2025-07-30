@@ -1,5 +1,21 @@
+import os
+from pathlib import Path
+
+# Dataset root directory - uses ~/data as the centralized location
+DATASET_ROOT = os.path.expanduser('~/data')
+
+# Specific dataset paths
+DATASET_PATHS = {
+    'cifar10': os.path.join(DATASET_ROOT, 'cifar10'),
+    'cifar100': os.path.join(DATASET_ROOT, 'cifar-100-python'),
+    'ffhq': os.path.join(DATASET_ROOT, 'ffhq_dataset'),
+    'ffhq128': os.path.join(DATASET_ROOT, 'ffhq_dataset'),
+    'caltech256': os.path.join(DATASET_ROOT, 'caltech256'),
+}
+
 settings = {
-    "name_dataset": "cifar10",  # "cifar10" or "cifar100" or "caltech256"
+    "name_dataset": "ffhq128",  # "cifar10" or "cifar100" or "caltech256" or "ffhq128"
+    "data_root": DATASET_ROOT,  # Root directory for all datasets
     "arch": "simplenet",  # "mobilenet" or "resnet18" or "shufflenet"
     "pretrained": True,
     "patience": 3,
@@ -28,7 +44,7 @@ settings = {
     "delta": 1e-5,
     "epsilon": 5.0,           
 
-    "clustering": False,       # RE-ENABLE MPC - Testing the fix!
+    "clustering": True,       # RE-ENABLE MPC - Testing the fix!
     "type_ss": "additif",
     "threshold": 3,
     "m": 3,
