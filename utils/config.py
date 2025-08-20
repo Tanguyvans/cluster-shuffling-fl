@@ -5,10 +5,22 @@ def initialize_parameters(settings, training_approach):
     # Don't override data_root if it's already set in config
     if "data_root" not in settings:
         settings["data_root"] = "Data"
+    
+    # Create descriptive directory names
+    dataset_name = settings.get('name_dataset', 'unknown')
+    n_clients = settings.get('number_of_clients_per_node', 1) * settings.get('number_of_nodes', 1)
+    n_rounds = settings.get('n_rounds', 10)
+    
+    # Determine FL approach
+    fl_approach = "smpc" if settings.get('clustering', False) else "classic"
+    
+    # Create structured directory name
+    result_dir = f"results/{dataset_name}_{fl_approach}_{n_clients}clients_{n_rounds}rounds/"
+    
     settings["roc_path"] = None  # "roc"
     settings["matrix_path"] = None  # "matrix"
-    settings["save_results"] = f"results/{training_approach}/"
-    settings["save_model"] = f"models/{training_approach}/"
+    settings["save_results"] = result_dir
+    settings["save_model"] = f"models/{dataset_name}_{fl_approach}_{n_clients}clients_{n_rounds}rounds/"
     settings["save_client_models"] = f"{settings['save_results']}client_models/"
 
     # clients

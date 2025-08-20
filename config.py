@@ -14,7 +14,7 @@ DATASET_PATHS = {
 }
 
 settings = {
-    "name_dataset": "ffhq128",  # "cifar10" or "cifar100" or "caltech256" or "ffhq128"
+    "name_dataset": "cifar10",  # "cifar10" or "cifar100" or "ffhq128"
     "data_root": DATASET_ROOT,  # Root directory for all datasets
     "arch": "simplenet",  # "mobilenet" or "resnet18" or "shufflenet"
     "pretrained": True,
