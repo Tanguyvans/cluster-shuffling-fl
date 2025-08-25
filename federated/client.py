@@ -110,12 +110,15 @@ class Client:
 
         client_socket.close()
 
-    def train(self):
+    def train(self, config=None):
         if self.global_model_weights is None:
             print(f"[Client {self.id}] Warning: No global model weights for client {self.id}. Training cannot proceed.")
             return None # Return None if training cannot start
 
-        res, metrics = self.flower_client.fit(self.global_model_weights, self.id, {})
+        if config is None:
+            config = {}
+            
+        res, metrics = self.flower_client.fit(self.global_model_weights, self.id, config)
         test_metrics = self.flower_client.evaluate(res, {'name': f'Client {self.id}'})
         
         with open(self.save_results + "output.txt", "a") as fi:
@@ -330,19 +333,25 @@ class Client:
                 'threshold': self.threshold
             }
         
-        # Prepare gradients if needed
+        # Prepare gradients if needed (similar to simple_federated.py format)
         gradients = None
         gradient_metadata = None
-        if save_gradients and hasattr(self, 'last_gradients') and self.last_gradients is not None:
-            gradients = self.last_gradients
+        if save_gradients and hasattr(self.flower_client, 'last_gradients') and self.flower_client.last_gradients is not None:
+            gradients = self.flower_client.last_gradients
             gradient_metadata = {
                 'batch_indices': getattr(self, 'last_batch_indices', []),
-                'batch_labels': getattr(self, 'last_batch_labels', torch.empty(0)),
-                'batch_images': getattr(self, 'last_batch_images', torch.empty(0)),
-                'grad_norm': getattr(self, 'last_grad_norm', 0.0),
+                'batch_labels': getattr(self.flower_client, 'last_batch_labels', torch.empty(0)),
+                'batch_images': getattr(self.flower_client, 'last_batch_images', torch.empty(0)),
+                'grad_norm': getattr(self.flower_client, 'last_grad_norm', 0.0),
+                'loss': getattr(self.flower_client, 'last_loss', 0.0),
+                'accuracy': getattr(self.flower_client, 'last_accuracy', 0.0),
                 'model_architecture': experiment_config.get('arch', 'unknown'),
                 'dataset': experiment_config.get('name_dataset', 'unknown')
             }
+            
+            print(f"[Client {self.id}] Preparing gradients for saving: {len(gradients)} gradient tensors")
+            print(f"[Client {self.id}] Gradient batch: {gradient_metadata['batch_images'].shape if gradient_metadata['batch_images'].numel() > 0 else 'empty'}")
+            print(f"[Client {self.id}] Gradient loss: {gradient_metadata['loss']:.4f}, accuracy: {gradient_metadata['accuracy']:.2f}%")
         
         # Save using ModelManager
         saved_paths = self.model_manager.save_client_model(

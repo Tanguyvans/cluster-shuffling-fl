@@ -12,7 +12,14 @@ from config import settings
 def train_client(client_obj, metrics_tracker=None, current_round=0, training_barrier=None):
     # Train the model - client_obj.train() should now always return raw weights or None
     print(f"[Client {client_obj.id}] Starting training for round {current_round}...")
-    weights = client_obj.train() 
+    
+    # Determine if we should capture gradients for this round
+    capture_gradients = (settings.get('save_gradients', False) and 
+                        current_round in settings.get('save_gradients_rounds', []))
+    
+    # Pass gradient capture config to the training
+    training_config = {'capture_gradients': capture_gradients}
+    weights = client_obj.train(training_config) 
 
     if weights is None:
         print(f"[Client {client_obj.id}] Training returned no weights (round {current_round}). Not sending anything.")
@@ -70,17 +77,32 @@ def train_client(client_obj, metrics_tracker=None, current_round=0, training_bar
             print(f"[Client {client_obj.id}] Clustering enabled, but client has NO connections (cluster of 1) for round {current_round}.")
         
         try:
-            print(f"[Client {client_obj.id}] Applying SMPC to raw weights for {len(client_obj.connections) + 1} shares (round {current_round})...")
-            # Ensure apply_smpc is called with weights which are a list of np.ndarray
-            smpc_input_weights = weights # weights from client_obj.train() -> res from FlowerClient.fit
+            # Choose aggregation method based on config
+            aggregation_method = settings.get('aggregation_method', 'weights')
+            
+            if aggregation_method == 'gradients':
+                print(f"[Client {client_obj.id}] Applying SMPC to gradients for {len(client_obj.connections) + 1} shares (round {current_round})...")
+                
+                # Use gradients if captured, fallback to weights
+                if hasattr(client_obj.flower_client, 'last_gradients') and client_obj.flower_client.last_gradients is not None:
+                    print(f"[Client {client_obj.id}] Using captured gradients for SMPC")
+                    # Convert gradients to numpy for SMPC compatibility
+                    smpc_input_data = [grad.cpu().numpy() for grad in client_obj.flower_client.last_gradients]
+                else:
+                    print(f"[Client {client_obj.id}] Warning: No gradients captured, falling back to weights")
+                    smpc_input_data = weights
+                    
+            else:  # aggregation_method == 'weights'
+                print(f"[Client {client_obj.id}] Applying SMPC to model weights for {len(client_obj.connections) + 1} shares (round {current_round})...")
+                smpc_input_data = weights # weights from client_obj.train() -> res from FlowerClient.fit
             
             all_shares, client_obj.list_shapes = apply_smpc(
-                smpc_input_weights, 
+                smpc_input_data, 
                 len(client_obj.connections) + 1,
                 client_obj.type_ss, 
                 client_obj.threshold
             )
-            print(f"[Client {client_obj.id}] SMPC applied for round {current_round}. Generated {len(all_shares)} shares in total.")
+            print(f"[Client {client_obj.id}] SMPC applied to {aggregation_method} for round {current_round}. Generated {len(all_shares)} shares in total.")
 
             # Save all generated fragments/shares using ModelManager
             shares_to_send = list(all_shares) # Create a mutable copy for sending

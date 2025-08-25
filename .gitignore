@@ -1,6 +1,5 @@
 *__pycache__
 /env
-/models
 /keys
 /results
 /Data
@@ -9,4 +8,8 @@ trained_models.npz
 /cluster_shuffling_env
 /datasets
 .env
+
+/federated_reconstructions
+/federated_simple_gradients
+/federated_simple_models
 *.pyc
