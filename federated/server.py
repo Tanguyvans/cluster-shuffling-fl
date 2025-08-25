@@ -6,6 +6,8 @@ import sys
 import shutil
 import random
 import numpy as np
+import torch
+import time
 from flwr.server.strategy.aggregate import aggregate
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -154,15 +156,24 @@ class Node:
             client_socket.close()
 
     def get_weights(self, len_dataset=10):
-        # same
+        # Load from .pt files instead of .npz
         params_list = []
         for block in self.blockchain.blocks[::-1]:
             if block.model_type == "update":
-                loaded_weights_dict = np.load(block.storage_reference)
-                loaded_weights = [val for name, val in loaded_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
-                loaded_weights = (loaded_weights, loaded_weights_dict[f'len_dataset'])
+                if block.storage_reference.endswith('.pt'):
+                    loaded_data = torch.load(block.storage_reference, map_location='cpu')
+                    model_state = loaded_data['model_state']
+                    loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
+                                    for name, val in model_state.items() if 'bn' not in name]
+                    len_dataset_val = loaded_data.get('len_dataset', 10)
+                else:
+                    # Fallback for .npz files
+                    loaded_weights_dict = np.load(block.storage_reference)
+                    loaded_weights = [val for name, val in loaded_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
+                    len_dataset_val = loaded_weights_dict.get('len_dataset', 10)
+                
+                loaded_weights = (loaded_weights, len_dataset_val)
                 params_list.append(loaded_weights)
-
             else:
                 break
 
@@ -178,8 +189,17 @@ class Node:
         return weights_dict
 
     def broadcast_model_to_clients(self, filename):
-        loaded_weights_dict = np.load(filename)
-        loaded_weights = [val for name, val in loaded_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
+        # Load .pt file instead of .npz
+        if filename.endswith('.pt'):
+            loaded_data = torch.load(filename, map_location='cpu')
+            model_state = loaded_data['model_state']
+            # Convert to list format for compatibility with existing client code
+            loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
+                            for name, val in model_state.items() if 'bn' not in name]
+        else:
+            # Fallback to numpy loading for compatibility
+            loaded_weights_dict = np.load(filename)
+            loaded_weights = [val for name, val in loaded_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
 
         for k, v in self.clients.items():
             print("sending to client", k)
@@ -207,31 +227,39 @@ class Node:
 
         global_model_dir = os.path.join(self.save_results, "global_models")
         os.makedirs(global_model_dir, exist_ok=True)
-        filename = os.path.join(global_model_dir, f"node_{self.id}_round_0_global_model.npz")
         
-        self.global_params_directory = filename
-        # The following line was for a different directory structure, 
-        # ensure "models/CFL/" is not strictly needed or adapt if other parts rely on it.
-        # os.makedirs("models/CFL/", exist_ok=True) # Potentially remove if not needed by other logic
+        # Use only .pt format
+        pt_filename = os.path.join(global_model_dir, f"node_{self.id}_round_0_global_model.pt")
         
-        # Ajouter le tracking du stockage
+        self.global_params_directory = pt_filename
+        
+        # Track storage
         if self.metrics_tracker:
             file_size = sys.getsizeof(pickle.dumps(weights_dict)) / (1024 * 1024)  # Convert to MB
             self.metrics_tracker.record_storage_communication(0, file_size, 'save')
-            
-        with open(filename, "wb") as fi:
-            np.savez(fi, **weights_dict)
-        print(f"[Node {self.id}] Saved first global model to {filename}")
+        
+        # Save only PT format
+        pt_data = {
+            'round': 0,
+            'model_state': {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                           for k, v in weights_dict.items() if k != 'len_dataset'},
+            'len_dataset': weights_dict.get('len_dataset', 0),
+            'timestamp': time.time(),
+            'node_id': self.id
+        }
+        torch.save(pt_data, pt_filename)
+        
+        print(f"[Node {self.id}] Saved first global model to {pt_filename}")
 
-        self.broadcast_model_to_clients(filename)
+        self.broadcast_model_to_clients(pt_filename)
 
     def create_global_model(self, models_arg, index, two_step=False):
         processing_list = []  # This will hold tuples of (client_weight_params, client_num_examples, original_client_id)
         
         global_model_dir = os.path.join(self.save_results, "global_models")
         os.makedirs(global_model_dir, exist_ok=True)
-        # Define filename for the new global model early
-        new_global_model_filename = os.path.join(global_model_dir, f"node_{self.id}_round_{index}_global_model.npz")
+        # Define filename for the new global model early - use .pt format
+        new_global_model_filename = os.path.join(global_model_dir, f"node_{self.id}_round_{index}_global_model.pt")
 
         if models_arg:
             # If models are passed directly, create placeholder IDs and default num_examples
@@ -276,8 +304,21 @@ class Node:
         not_useful_client_ids_log = []
 
         # Load current global model for comparison
-        global_weights_dict = np.load(self.global_params_directory)
-        global_weights_params = [val for name, val in global_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
+        if self.global_params_directory.endswith('.pt'):
+            # Load PyTorch format
+            global_model_data = torch.load(self.global_params_directory, map_location='cpu')
+            if 'model_state' in global_model_data:
+                model_state = global_model_data['model_state']
+                global_weights_params = [val.numpy() if isinstance(val, torch.Tensor) else val 
+                                       for key, val in model_state.items() 
+                                       if 'bn' not in key and 'len_dataset' not in key]
+            else:
+                # Fallback: assume direct weight list format
+                global_weights_params = self.flower_client.get_parameters({})
+        else:
+            # Load NumPy format (legacy)
+            global_weights_dict = np.load(self.global_params_directory)
+            global_weights_params = [val for name, val in global_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
         
         # Temporary directory for client models during usefulness check
         temp_model_eval_dir = os.path.join(self.save_results, "temp_client_models_for_eval")
@@ -340,15 +381,26 @@ class Node:
             weights_dict = self.flower_client.get_dict_params({})
             weights_dict['len_dataset'] = 0 
 
+            # Use only .pt format
             self.global_params_directory = new_global_model_filename
             
             if self.metrics_tracker:
                 file_size = sys.getsizeof(pickle.dumps(weights_dict)) / (1024 * 1024)
                 self.metrics_tracker.record_storage_communication(index, file_size, 'save')
-                
-            with open(self.global_params_directory, "wb") as fi:
-                np.savez(fi, **weights_dict)
-            print(f"[Node {self.id}] Saved aggregated global model for round {index} to {self.global_params_directory}")
+            
+            # Save only PT format
+            pt_data = {
+                'round': index,
+                'model_state': {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                               for k, v in weights_dict.items() if k != 'len_dataset'},
+                'len_dataset': weights_dict.get('len_dataset', 0),
+                'timestamp': time.time(),
+                'node_id': self.id,
+                'metrics': metrics
+            }
+            torch.save(pt_data, new_global_model_filename)
+            
+            print(f"[Node {self.id}] Saved aggregated global model for round {index} to {new_global_model_filename}")
 
             with open(self.save_results + "output.txt", "a") as fi:
                 fi.write(f"Round {index}, Global aggregation after usefulness check: {metrics}\n")

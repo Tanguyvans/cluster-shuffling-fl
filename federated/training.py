@@ -3,6 +3,7 @@ import time
 import socket
 import pickle
 import numpy as np
+import torch
 import sys
 from security import apply_smpc
 from config import settings
@@ -21,29 +22,26 @@ def train_client(client_obj, metrics_tracker=None, current_round=0, training_bar
 
     print(f"[Client {client_obj.id}] Training finished for round {current_round}. Received raw weights of type: {type(weights)}")
 
-    # Save client model for this round in .npz format
-    client_round_model_dir = os.path.join(settings['save_client_models'], "round_models")
-    os.makedirs(client_round_model_dir, exist_ok=True)
+    # Determine if we should save gradients for this round
+    save_gradients = (settings.get('save_gradients', False) and 
+                     current_round in settings.get('save_gradients_rounds', []))
     
-    client_round_model_path = os.path.join(client_round_model_dir, f"{client_obj.id}_round_{current_round}_model.npz")
-    
+    # Save client model in .pt format using the new client method
     try:
-        # Convert weights to numpy format and save as .npz
-        if isinstance(weights, list):
-            # weights is a list of numpy arrays (standard format from FlowerClient)
-            weights_dict = {}
-            for i, weight_array in enumerate(weights):
-                weights_dict[f'param_{i}'] = weight_array
-        else:
-            # weights might be in different format, handle accordingly
-            weights_dict = {'weights': weights}
+        client_obj.save_client_model(current_round, model_weights=weights, save_gradients=save_gradients)
         
-        with open(client_round_model_path, "wb") as fi:
-            np.savez(fi, **weights_dict)
-        print(f"[Client {client_obj.id}] Saved round {current_round} model to {client_round_model_path}")
+        # If gradients are requested but not yet captured, try to capture them
+        if save_gradients and not hasattr(client_obj, 'last_gradients'):
+            print(f"[Client {client_obj.id}] Attempting to capture gradients for attack evaluation...")
+            try:
+                # This would require access to the model and a sample batch
+                # For now, we'll set placeholder values that can be updated by the flower client
+                client_obj.last_gradients = []  # Will be populated if flower_client supports it
+            except Exception as e:
+                print(f"[Client {client_obj.id}] Could not capture gradients: {e}")
         
     except Exception as e:
-        print(f"[Client {client_obj.id}] Error saving round model: {e}")
+        print(f"[Client {client_obj.id}] Error saving client model: {e}")
         import traceback
         traceback.print_exc()
 
@@ -65,26 +63,44 @@ def train_client(client_obj, metrics_tracker=None, current_round=0, training_bar
             )
             print(f"[Client {client_obj.id}] SMPC applied for round {current_round}. Generated {len(all_shares)} shares in total.")
 
-            # Save all generated fragments/shares
+            # Save all generated fragments/shares in .pt format
             fragments_dir = os.path.join(settings['save_results'], "fragments")
             os.makedirs(fragments_dir, exist_ok=True)
             shares_to_send = list(all_shares) # Create a mutable copy for sending
 
             for i, share_data in enumerate(all_shares):
-                # share_data is a list of numpy arrays (parameters for one share)
-                share_dict = {f"param_{j}": param for j, param in enumerate(share_data)}
+                # Convert share_data to PyTorch tensors
+                if isinstance(share_data, list):
+                    # share_data is a list of tensors/arrays (parameters for one share)
+                    share_dict = {}
+                    for j, param in enumerate(share_data):
+                        if isinstance(param, np.ndarray):
+                            share_dict[f"param_{j}"] = torch.from_numpy(param)
+                        elif isinstance(param, torch.Tensor):
+                            share_dict[f"param_{j}"] = param.clone().detach()
+                        else:
+                            share_dict[f"param_{j}"] = torch.tensor(param)
+                else:
+                    # Handle other formats
+                    share_dict = {"share_data": share_data}
+                
+                share_metadata = {
+                    'round': current_round,
+                    'client_id': client_obj.id,
+                    'share_index': i,
+                    'share': share_dict,
+                    'method': client_obj.type_ss,
+                    'timestamp': time.time()
+                }
+                
                 if client_obj.list_shapes:
-                    try:
-                        share_dict["list_shapes"] = np.array(client_obj.list_shapes, dtype=object)
-                    except Exception as e:
-                        print(f"[Client {client_obj.id}] Warning: Could not directly save list_shapes for share {i} (round {current_round}): {e}")
+                    share_metadata['list_shapes'] = client_obj.list_shapes
                 
                 frag_filename = os.path.join(
                     fragments_dir,
-                    f"{client_obj.id}_round_{current_round}_frag_share_{i}.npz" 
+                    f"{client_obj.id}_round_{current_round}_frag_share_{i}.pt" 
                 )
-                with open(frag_filename, "wb") as fi:
-                    np.savez(fi, **share_dict)
+                torch.save(share_metadata, frag_filename)
                 # print(f"[Client {client_obj.id}] Saved fragment share {i} to {frag_filename} (round {current_round})")
             
             client_obj.frag_weights.append(shares_to_send.pop()) # Keep one share (modifies shares_to_send)
@@ -102,22 +118,33 @@ def train_client(client_obj, metrics_tracker=None, current_round=0, training_bar
             if summed_w is not None:
                 print(f"[Client {client_obj.id}] Successfully obtained summed weights for round {current_round}. Proceeding to send to node.")
                 
-                # Save cluster-aggregated model
+                # Save cluster-aggregated model in .pt format
                 cluster_models_dir = os.path.join(settings['save_results'], "cluster_models")
                 os.makedirs(cluster_models_dir, exist_ok=True)
-                cluster_model_dict = {f"param_{j}": param for j, param in enumerate(summed_w)}
-                if client_obj.list_shapes: # list_shapes from the original pre-SMPC model structure
-                    try:
-                        cluster_model_dict["list_shapes"] = np.array(client_obj.list_shapes, dtype=object)
-                    except Exception as e:
-                        print(f"[Client {client_obj.id}] Warning: Could not directly save list_shapes for cluster sum (round {current_round}): {e}")
+                
+                # Convert NumPy arrays to PyTorch tensors for .pt format
+                cluster_model_state = {}
+                for j, param in enumerate(summed_w):
+                    if isinstance(param, np.ndarray):
+                        cluster_model_state[f"param_{j}"] = torch.from_numpy(param)
+                    else:
+                        cluster_model_state[f"param_{j}"] = param
+                
+                cluster_model_data = {
+                    'round': current_round,
+                    'client_id': client_obj.id,
+                    'model_state': cluster_model_state,
+                    'timestamp': time.time()
+                }
+                
+                if client_obj.list_shapes:
+                    cluster_model_data['list_shapes'] = client_obj.list_shapes
 
                 cluster_sum_filename = os.path.join(
                     cluster_models_dir,
-                    f"{client_obj.id}_round_{current_round}_cluster_sum.npz"
+                    f"{client_obj.id}_round_{current_round}_cluster_sum.pt"
                 )
-                with open(cluster_sum_filename, "wb") as fi:
-                    np.savez(fi, **cluster_model_dict)
+                torch.save(cluster_model_data, cluster_sum_filename)
                 print(f"[Client {client_obj.id}] Saved cluster summed model to {cluster_sum_filename} (round {current_round})")
 
                 client_obj.send_frag_node() 

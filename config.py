@@ -50,6 +50,11 @@ settings = {
     "m": 3,
     "ts": 5,                  
 
+    # New settings for PyTorch-based SMPC and gradient saving
+    "save_gradients": True,                    # Enable gradient saving for attacks
+    "save_gradients_rounds": [1, 5, 10],      # Which rounds to save gradients
+    "use_pytorch_smpc": True,                  # Use pure PyTorch SMPC (no NumPy)
+    
     "save_figure": True,
     "matrix_path": "results/CFL/matrix_path",
     "roc_path": "results/CFL/roc_path",

@@ -2,6 +2,7 @@ import socket
 import pickle
 import time
 import os
+import torch
 from sklearn.model_selection import train_test_split
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -53,6 +54,15 @@ class Client:
         )
 
         self.metrics_tracker = kwargs.get('metrics_tracker')
+        
+        # Store training data for gradient saving
+        self.last_batch_images = None
+        self.last_batch_labels = None
+        self.last_batch_indices = None
+        self.last_gradients = None
+        self.last_loss = None
+        self.last_accuracy = None
+        self.last_grad_norm = None
 
     def start_server(self):
         from .server import start_server
@@ -108,10 +118,14 @@ class Client:
                 f"val: {metrics['val_loss']} {metrics['val_acc']} "
                 f"test: {test_metrics['test_loss']} {test_metrics['test_acc']}\n")
         
+        # Store training metrics for potential gradient saving
+        self.last_loss = test_metrics['test_loss']
+        self.last_accuracy = test_metrics['test_acc']
+        
         # Always return the raw weights from training. 
         # SMPC will be handled by the train_client function if clustering is enabled.
         print(f"[Client {self.id}] Training complete. Returning raw weights to train_client function.")
-        return res 
+        return res
 
     def send_frag_clients(self, frag_weights):
         for i, (k, v) in enumerate(self.connections.items()):
@@ -249,3 +263,118 @@ class Client:
                 backend=default_backend()
             )
         self.connections[client_id] = {"address": ("127.0.0.1", address), "public_key": public_key}
+
+    def save_client_model(self, round_num, model_weights=None, save_gradients=False):
+        """
+        Save client model and optionally gradients in .pt format
+        
+        Args:
+            round_num: Current training round number
+            model_weights: Model weights to save (if None, gets from flower_client)
+            save_gradients: Whether to save gradients for attack evaluation
+        """
+        if model_weights is None:
+            model_weights = self.flower_client.get_parameters({})
+        
+        # Create client model directory
+        client_model_dir = os.path.join(self.save_results, "client_models")
+        os.makedirs(client_model_dir, exist_ok=True)
+        
+        # Convert weights to state dict format
+        model_state = {}
+        if hasattr(self.flower_client, 'model') and hasattr(self.flower_client.model, 'state_dict'):
+            # If we have access to the actual model, use its state dict
+            model_state = {k: v.clone().detach().cpu() for k, v in self.flower_client.model.state_dict().items()}
+        else:
+            # Otherwise, convert from weights list
+            for i, weight in enumerate(model_weights):
+                if isinstance(weight, np.ndarray):
+                    model_state[f'layer_{i}'] = torch.from_numpy(weight)
+                else:
+                    model_state[f'layer_{i}'] = weight
+        
+        # Save client model
+        client_data = {
+            'round': round_num,
+            'client_id': self.id,
+            'model_state': model_state,
+            'final_loss': getattr(self, 'last_loss', 0.0),
+            'final_accuracy': getattr(self, 'last_accuracy', 0.0),
+            'timestamp': time.time()
+        }
+        
+        model_filename = os.path.join(client_model_dir, f"c{self.id}_round_{round_num}_model.pt")
+        torch.save(client_data, model_filename)
+        print(f"[Client {self.id}] Saved model to {model_filename}")
+        
+        # Save gradients if requested
+        if save_gradients and hasattr(self, 'last_gradients') and self.last_gradients is not None:
+            self._save_gradients(round_num, model_state)
+    
+    def _save_gradients(self, round_num, model_state):
+        """Save gradients for attack evaluation"""
+        gradient_dir = os.path.join(self.save_results, "gradient_inversion")
+        os.makedirs(gradient_dir, exist_ok=True)
+        
+        # Calculate gradient norm
+        grad_norm = 0.0
+        if self.last_gradients:
+            grad_norms = [g.norm().item() if hasattr(g, 'norm') else 0.0 for g in self.last_gradients]
+            grad_norm = sum(grad_norms) / len(grad_norms) if grad_norms else 0.0
+        
+        gradient_data = {
+            'round': round_num,
+            'client_id': self.id,
+            'gradients': [g.clone().detach().cpu() if hasattr(g, 'clone') else g 
+                         for g in (self.last_gradients or [])],
+            'loss': getattr(self, 'last_loss', 0.0),
+            'accuracy': getattr(self, 'last_accuracy', 0.0),
+            'grad_norm': grad_norm,
+            'model_state': model_state,
+            'batch_indices': getattr(self, 'last_batch_indices', []),
+            'batch_labels': getattr(self, 'last_batch_labels', torch.empty(0)),
+            'batch_images': getattr(self, 'last_batch_images', torch.empty(0)),
+            'model_architecture': 'unknown',  # Will be filled by main training loop
+            'num_classes': 10,  # Default, will be updated by main training loop
+            'dataset': 'unknown',  # Will be filled by main training loop
+            'timestamp': time.time()
+        }
+        
+        gradient_filename = os.path.join(gradient_dir, f"round_{round_num}_client_{self.id}.pt")
+        torch.save(gradient_data, gradient_filename)
+        print(f"[Client {self.id}] Saved gradients to {gradient_filename}")
+    
+    def capture_gradients_from_model(self, model, loss_fn, batch_images, batch_labels):
+        """
+        Capture gradients from a model for a specific batch
+        
+        Args:
+            model: The PyTorch model
+            loss_fn: Loss function
+            batch_images: Input batch images
+            batch_labels: Input batch labels
+        """
+        model.eval()
+        model.zero_grad()
+        
+        # Forward pass
+        outputs = model(batch_images)
+        loss = loss_fn(outputs, batch_labels)
+        
+        # Get gradients
+        gradients = torch.autograd.grad(loss, model.parameters(), create_graph=False, retain_graph=False)
+        
+        # Store for later saving
+        self.last_gradients = [g.clone().detach() for g in gradients]
+        self.last_batch_images = batch_images.clone().detach().cpu()
+        self.last_batch_labels = batch_labels.clone().detach().cpu()
+        self.last_loss = loss.item()
+        
+        # Calculate accuracy
+        _, predicted = outputs.max(1)
+        correct = predicted.eq(batch_labels).sum().item()
+        self.last_accuracy = 100. * correct / len(batch_labels)
+        
+        # Calculate gradient norm
+        grad_norms = [g.norm().item() for g in gradients]
+        self.last_grad_norm = sum(grad_norms) / len(grad_norms) if grad_norms else 0.0

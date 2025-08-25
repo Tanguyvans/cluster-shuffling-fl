@@ -175,6 +175,15 @@ if __name__ == "__main__":
         # Training phase
         print(f"\nROUND {current_fl_round}: Node 1 : Starting client training phase...\n")
         metrics_tracker.measure_power(current_fl_round, "node_1_training_start")
+        
+        # Update client metadata for gradient saving
+        for client in node_clients.values():
+            if hasattr(client, '_save_gradients'):
+                # Update metadata in saved gradient data
+                client.dataset_name = settings['name_dataset']
+                client.model_architecture = settings['arch']
+                client.num_classes = len(list_classes)
+        
         threads = []
         for client in node_clients.values():
             t = threading.Thread(target=train_client, args=(client, metrics_tracker, current_fl_round))
