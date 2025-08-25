@@ -5,7 +5,8 @@ from tqdm.auto import tqdm
 
 
 def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, scheduler=None, device="cpu",
-          dp=False, delta=1e-5, max_physical_batch_size=256, privacy_engine=None, patience=2, save_model=None, single_batch_training=False):
+          dp=False, delta=1e-5, max_physical_batch_size=256, privacy_engine=None, patience=2, save_model=None, single_batch_training=False,
+          capture_gradients=False):
 
     # Create empty results dictionary
     results = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [], "stopping_n_epoch": None}
@@ -53,6 +54,44 @@ def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, 
             print(f"Early stopping triggered after {epoch + 1} epochs.")
             results["stopping_n_epoch"] = epoch + 1
             break
+
+    # Capture gradients if requested (similar to simple_federated.py)
+    if capture_gradients:
+        print(f"[Node {node_id}] Capturing gradients for gradient inversion attack evaluation...")
+        model.eval()
+        model.zero_grad()
+        
+        # Use the first batch from training data for gradient computation
+        for x_batch, y_batch in train_loader:
+            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+            
+            # Forward pass
+            outputs = model(x_batch)
+            loss = loss_fn(outputs, y_batch)
+            
+            # Compute gradients
+            gradients = torch.autograd.grad(loss, model.parameters(), create_graph=False, retain_graph=False)
+            
+            # Store gradient information in results
+            results["gradients"] = [grad.detach().clone().cpu() for grad in gradients]
+            results["gradient_batch_images"] = x_batch.detach().clone().cpu()
+            results["gradient_batch_labels"] = y_batch.detach().clone().cpu()
+            results["gradient_loss"] = loss.item()
+            
+            # Calculate gradient norm
+            grad_norms = [g.norm().item() for g in gradients]
+            results["gradient_norm"] = sum(grad_norms) / len(grad_norms) if grad_norms else 0.0
+            
+            # Calculate accuracy for this batch
+            _, predicted = outputs.max(1)
+            correct = predicted.eq(y_batch).sum().item()
+            results["gradient_accuracy"] = 100. * correct / len(y_batch)
+            
+            print(f"[Node {node_id}] Captured gradients from batch of {len(x_batch)} samples")
+            print(f"[Node {node_id}] Gradient loss: {results['gradient_loss']:.4f}, accuracy: {results['gradient_accuracy']:.2f}%")
+            break  # Only use first batch for gradient capture
+        
+        model.train()
 
     return results
 
