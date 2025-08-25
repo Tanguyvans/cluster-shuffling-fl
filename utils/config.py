@@ -1,4 +1,5 @@
 import os
+import time
 import threading
 
 def initialize_parameters(settings, training_approach):
@@ -12,16 +13,23 @@ def initialize_parameters(settings, training_approach):
     n_rounds = settings.get('n_rounds', 10)
     
     # Determine FL approach
-    fl_approach = "smpc" if settings.get('clustering', False) else "classic"
+    # Determine configuration suffix
+    config_parts = []
+    if settings.get('clustering', False):
+        config_parts.append("smpc")
+    if settings.get('diff_privacy', False):
+        config_parts.append("dp")
     
-    # Create structured directory name
-    result_dir = f"results/{dataset_name}_{fl_approach}_{n_clients}clients_{n_rounds}rounds/"
+    config_suffix = "_".join(config_parts) if config_parts else "classic"
+    
+    # Create informative directory name with key parameters
+    result_dir = f"results/{dataset_name}_{config_suffix}_c{n_clients}_r{n_rounds}/"
     
     settings["roc_path"] = None  # "roc"
     settings["matrix_path"] = None  # "matrix"
     settings["save_results"] = result_dir
-    settings["save_model"] = f"models/{dataset_name}_{fl_approach}_{n_clients}clients_{n_rounds}rounds/"
-    settings["save_client_models"] = f"{settings['save_results']}client_models/"
+    # Legacy save_model removed - ModelManager handles all model saving
+    # Legacy client models directory - now handled by ModelManager
 
     # clients
     training_barrier = threading.Barrier(settings['number_of_clients_per_node'])
@@ -44,6 +52,5 @@ def initialize_parameters(settings, training_approach):
               "\tNumber of Clients per Cluster: ", settings["min_number_of_clients_in_cluster"], "\n")
 
     os.makedirs(settings["save_results"], exist_ok=True)
-    os.makedirs(settings["save_model"], exist_ok=True)
-    os.makedirs(settings["save_client_models"], exist_ok=True)
+    # Legacy save_model and client_models directory creation removed - ModelManager handles directory structure
     return training_barrier, None

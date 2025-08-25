@@ -21,6 +21,9 @@ settings = {
     "patience": 3,
     "batch_size": 32,
     "n_epochs": 10,
+    
+    # Single batch training for inference attacks
+    "single_batch_training": True,  # Set to True to train on only one batch per epoch
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
@@ -50,6 +53,11 @@ settings = {
     "m": 3,
     "ts": 5,                  
 
+    # New settings for PyTorch-based SMPC and gradient saving
+    "save_gradients": True,                    # Enable gradient saving for attacks
+    "save_gradients_rounds": [1, 5, 10],      # Which rounds to save gradients
+    "use_pytorch_smpc": True,                  # Use pure PyTorch SMPC (no NumPy)
+    
     "save_figure": True,
     "matrix_path": "results/CFL/matrix_path",
     "roc_path": "results/CFL/roc_path",

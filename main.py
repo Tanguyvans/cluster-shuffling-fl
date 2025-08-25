@@ -27,6 +27,7 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 from utils.system_metrics import MetricsTracker
+from utils.model_manager import ModelManager
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -41,6 +42,10 @@ if __name__ == "__main__":
     metrics_tracker = MetricsTracker(settings['save_results'])
     metrics_tracker.start_tracking()
     metrics_tracker.measure_global_power("start")
+    
+    # Create model manager for structured model saving
+    experiment_name = os.path.basename(settings['save_results'].rstrip('/'))
+    model_manager = ModelManager(experiment_name)
     
     # Initial setup phase
     metrics_tracker.measure_power(0, "initial_setup_start")
@@ -81,6 +86,7 @@ if __name__ == "__main__":
         tolerance_ceil=settings['tolerance_ceil'],
         dp=settings['diff_privacy'], 
         model_choice=settings['arch'],
+        model_manager=model_manager,
         batch_size=settings['batch_size'],
         classes=list_classes, 
         choice_loss=settings['choice_loss'],
@@ -90,7 +96,7 @@ if __name__ == "__main__":
         matrix_path=settings['matrix_path'],
         roc_path=settings['roc_path'],
         pretrained=settings['pretrained'],
-        save_model=settings['save_model'],
+        # Legacy save_model removed
         input_size=(128, 128) if 'ffhq' in settings['name_dataset'].lower() else (32, 32)
     )[0]
     metrics_tracker.measure_power(0, "server_creation_complete")
@@ -104,6 +110,7 @@ if __name__ == "__main__":
         settings['n_clients'],
         save_results=settings['save_results'],
         metrics_tracker=metrics_tracker,
+        model_manager=model_manager,
         dp=settings['diff_privacy'], 
         model_choice=settings['arch'],
         batch_size=settings['batch_size'],
@@ -120,7 +127,7 @@ if __name__ == "__main__":
         roc_path=settings['roc_path'],
         patience=settings['patience'],
         pretrained=settings['pretrained'],
-        save_model=settings['save_model'],
+        # Legacy save_model removed
         input_size=(128, 128) if 'ffhq' in settings['name_dataset'].lower() else (32, 32)
     )
     metrics_tracker.measure_power(0, "clients_creation_complete")
@@ -175,6 +182,15 @@ if __name__ == "__main__":
         # Training phase
         print(f"\nROUND {current_fl_round}: Node 1 : Starting client training phase...\n")
         metrics_tracker.measure_power(current_fl_round, "node_1_training_start")
+        
+        # Update client metadata for gradient saving
+        for client in node_clients.values():
+            if hasattr(client, '_save_gradients'):
+                # Update metadata in saved gradient data
+                client.dataset_name = settings['name_dataset']
+                client.model_architecture = settings['arch']
+                client.num_classes = len(list_classes)
+        
         threads = []
         for client in node_clients.values():
             t = threading.Thread(target=train_client, args=(client, metrics_tracker, current_fl_round))

@@ -23,12 +23,14 @@ class FlowerClient(fl.client.NumPyClient):
                  max_grad_norm=1.2, device="gpu", classes=(*range(10),),
                  learning_rate=0.001, choice_loss="cross_entropy", choice_optimizer="Adam", choice_scheduler=None,
                  step_size=5, gamma=0.1,
-                 save_figure=None, matrix_path=None, roc_path=None, patience=2, pretrained=True, save_model=None,
-                 type_ss="additif", threshold=3, m=3, noise_multiplier=1.0, input_size=(32, 32)):
+                 save_figure=None, matrix_path=None, roc_path=None, patience=2, pretrained=True,
+                 type_ss="additif", threshold=3, m=3, noise_multiplier=1.0, input_size=(32, 32),
+                 single_batch_training=False):
 
         self.batch_size = batch_size
         self.epochs = epochs
         self.model_choice = model_choice
+        self.single_batch_training = single_batch_training
         
         # Force disable DP if explicitly set to False
         self.dp = dp
@@ -81,7 +83,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.save_figure = save_figure
         self.matrix_path = matrix_path
         self.roc_path = roc_path
-        self.save_model = save_model
+        # Legacy save_model removed - ModelManager handles all model saving
 
     @classmethod
     def node(cls, x_test, y_test, **kwargs):
@@ -146,9 +148,9 @@ class FlowerClient(fl.client.NumPyClient):
                     self.epochs, self.criterion, optimizer, scheduler, device=self.device,
                     dp=self.dp, delta=self.delta,
                     max_physical_batch_size=int(self.batch_size / 4), privacy_engine=self.privacy_engine,
-                    patience=self.patience, save_model=self.save_model + f"{node_id}_best_model.pth")
+                    patience=self.patience, save_model=None, single_batch_training=self.single_batch_training)
 
-        self.model.load_state_dict(torch.load(self.save_model + f"{node_id}_best_model.pth"))
+        # Model state is already updated in-place by training, no need to reload from file
         best_parameters = self.get_parameters({})
         self.set_parameters(best_parameters)
         
