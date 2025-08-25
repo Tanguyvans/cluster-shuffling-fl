@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 
 
 def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, scheduler=None, device="cpu",
-          dp=False, delta=1e-5, max_physical_batch_size=256, privacy_engine=None, patience=2, save_model=None):
+          dp=False, delta=1e-5, max_physical_batch_size=256, privacy_engine=None, patience=2, save_model=None, single_batch_training=False):
 
     # Create empty results dictionary
     results = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [], "stopping_n_epoch": None}
@@ -13,7 +13,7 @@ def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, 
     epochs_no_improve = 0
 
     for epoch in tqdm(range(epochs)):
-        epoch_loss, epoch_acc = train_step(model, train_loader, loss_fn, optimizer, device, scheduler, privacy_engine)
+        epoch_loss, epoch_acc = train_step(model, train_loader, loss_fn, optimizer, device, scheduler, privacy_engine, single_batch_training)
         tmp = ""
 
         val_loss, val_acc, _, _, _ = test(model, val_loader, loss_fn, device=device)
@@ -43,21 +43,9 @@ def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, 
                 # Create directory if it doesn't exist
                 os.makedirs(os.path.dirname(save_model), exist_ok=True)
                 
-                # Save as .npz format (similar to global models)
-                if save_model.endswith('.npz'):
-                    # Convert state_dict to numpy and save as .npz
-                    state_dict = model.state_dict()
-                    weights_dict = {}
-                    for name, param in state_dict.items():
-                        weights_dict[f'model.{name}'] = param.detach().cpu().numpy()
-                    
-                    with open(save_model, "wb") as fi:
-                        np.savez(fi, **weights_dict)
-                    print(f"Model improved and saved to {save_model} (npz format)")
-                else:
-                    # Original PyTorch format
-                    torch.save(model.state_dict(), save_model)
-                    print(f"Model improved and saved to {save_model} (pytorch format)")
+                # Save in PyTorch .pt format only
+                torch.save(model.state_dict(), save_model)
+                print(f"Model improved and saved to {save_model} (pytorch format)")
         else:
             epochs_no_improve += 1
 
@@ -69,13 +57,14 @@ def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, 
     return results
 
 
-def train_step(model, dataloader, loss_fn, optimizer, device, scheduler=None, privacy_engine=None):
+def train_step(model, dataloader, loss_fn, optimizer, device, scheduler=None, privacy_engine=None, single_batch_training=False):
     model.train()
     accuracy = 0
     epoch_loss = 0
     total = 0
     correct = 0
 
+    batch_count = 0
     for x_batch, y_batch in dataloader:
         x_batch, y_batch = x_batch.to(device), y_batch.to(device)
 
@@ -93,18 +82,25 @@ def train_step(model, dataloader, loss_fn, optimizer, device, scheduler=None, pr
         # The optimizer's step method is already modified by the privacy engine
         # if it was properly initialized
         optimizer.step()
-
+        
+        batch_count += 1
+        
         # 3. Calculate accuracy
         _, predicted = torch.max(y_pred, 1)
         total += y_batch.size(0)
         correct += (predicted == y_batch).sum().item()
+        
+        # For single batch training, stop after processing one batch
+        if single_batch_training:
+            print(f"    Single batch training: processed {len(x_batch)} samples")
+            break
 
         # Print the current loss and accuracy
         if total > 0:
             accuracy = 100 * correct / total
 
     # Adjust metrics to get average loss and accuracy per batch
-    epoch_loss = epoch_loss / len(dataloader)
+    epoch_loss = epoch_loss / batch_count  # Use batch_count for single batch training
 
     if scheduler:
         scheduler.step()

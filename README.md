@@ -92,11 +92,19 @@ Training progress is logged to `results/CFL/output.txt` and includes:
 
 ### Trained Models
 
-Models are saved in:
+Models are managed through the centralized ModelManager with structured organization:
 
-- `results/CFL/global_models/`: Global aggregated models per round
-- `results/CFL/cluster_models/`: Individual cluster models
-- `models/`: Client-specific model checkpoints
+```
+results/[experiment_name]/
+├── models/
+│   ├── clients/round_XXX/        # Individual client models per round
+│   ├── global/                   # Aggregated global models
+│   ├── clusters/round_XXX/       # Cluster-level aggregations
+│   └── fragments/round_XXX/      # SMPC secret shares
+├── logs/                         # Training and experiment logs
+├── metrics/                      # Energy, communication, time tracking
+└── config.json                   # Experiment configuration
+```
 
 ## Privacy Attack Evaluation
 

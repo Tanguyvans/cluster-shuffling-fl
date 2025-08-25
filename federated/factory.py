@@ -4,7 +4,7 @@ from .server import Node
 from config import settings
 
 
-def create_nodes(test_sets, number_of_nodes, save_results, check_usefulness, coef_useful, tolerance_ceil, **kwargs):
+def create_nodes(test_sets, number_of_nodes, save_results, check_usefulness, coef_useful, tolerance_ceil, model_manager=None, **kwargs):
     list_nodes = []
     for i in range(number_of_nodes):
         list_nodes.append(
@@ -17,20 +17,18 @@ def create_nodes(test_sets, number_of_nodes, save_results, check_usefulness, coe
                 check_usefulness=check_usefulness,
                 coef_useful=coef_useful,
                 tolerance_ceil=tolerance_ceil,
+                model_manager=model_manager,
                 **kwargs
             )
         )
     return list_nodes
 
 
-def create_clients(train_sets, test_sets, node, number_of_clients, save_results, metrics_tracker, **kwargs):
+def create_clients(train_sets, test_sets, node, number_of_clients, save_results, metrics_tracker, model_manager=None, **kwargs):
     dict_clients = {}
     for num_client in range(number_of_clients):
         dataset_index = node * number_of_clients + num_client
         client_id = f"c{node}_{num_client + 1}"
-        
-        # Create individual client model save path in .npz format
-        client_model_path = os.path.join(settings['save_client_models'], f"{client_id}_best_model.npz")
         
         client_kwargs = {
             'id': client_id,
@@ -39,11 +37,11 @@ def create_clients(train_sets, test_sets, node, number_of_clients, save_results,
             'train': train_sets[dataset_index],
             'test': test_sets[dataset_index],
             'save_results': save_results,
+            'model_manager': model_manager,
             **kwargs
         }
         
-        # Override save_model with client-specific .npz path
-        client_kwargs['save_model'] = client_model_path
+        # Model saving now handled by ModelManager - no legacy save_model path needed
         
         # Only add secret sharing parameters if they exist in settings
         if 'secret_sharing' in settings:
