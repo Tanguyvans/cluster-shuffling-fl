@@ -16,16 +16,16 @@ DATASET_PATHS = {
 settings = {
     "name_dataset": "cifar10",  # "cifar10" or "cifar100" or "ffhq128"
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "simplenet",  # "mobilenet" or "resnet18" or "shufflenet"
-    "pretrained": True,
+    "arch": "convnet",  # "mobilenet" or "resnet18" or "shufflenet"
+    "pretrained": False,
     "patience": 3,
-    "batch_size": 32,
-    "n_epochs": 10,
+    "batch_size": 10,
+    "n_epochs": 3,
     
     # Single batch training for inference attacks
     "single_batch_training": True,  # Set to True to train on only one batch per epoch
     "number_of_nodes": 1,
-    "number_of_clients_per_node": 6,
+    "number_of_clients_per_node": 3,
     "min_number_of_clients_in_cluster": 3,
 
     "check_usefulness": False,
@@ -33,7 +33,7 @@ settings = {
     "tolerance_ceil": 0.08,
 
     "poisoned_number": 0,
-    "n_rounds": 10,
+    "n_rounds": 3,
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
     "lr": 0.001,              # Back to original LR
@@ -47,7 +47,7 @@ settings = {
     "delta": 1e-5,
     "epsilon": 5.0,           
 
-    "clustering": True,       # RE-ENABLE MPC - Testing the fix!
+    "clustering": False,       # RE-ENABLE MPC - Testing the fix!
     "type_ss": "additif",
     "threshold": 3,
     "m": 3,
@@ -55,8 +55,11 @@ settings = {
 
     # New settings for PyTorch-based SMPC and gradient saving
     "save_gradients": True,                    # Enable gradient saving for attacks
-    "save_gradients_rounds": [1, 5, 10],      # Which rounds to save gradients
+    "save_gradients_rounds": [1, 2, 3],       # Which rounds to save gradients
     "use_pytorch_smpc": True,                  # Use pure PyTorch SMPC (no NumPy)
+    "aggregation_method": "gradients",         # "weights" or "gradients" - what to use for SMPC/aggregation
+                                               # "gradients": More private, smaller data, better for attacks
+                                               # "weights": Traditional FL, larger data, current implementation
     
     "save_figure": True,
     "matrix_path": "results/CFL/matrix_path",
