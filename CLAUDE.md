@@ -75,12 +75,26 @@ This is a privacy-preserving federated learning framework implementing cluster s
 
 ### Key Implementation Details
 
-- **Results Structure**: `results/CFL/` contains:
-  - `global_models/`: Aggregated models per round
-  - `client_models/`: Individual client models and round checkpoints
-  - `cluster_models/`: Cluster-level aggregations
-  - `fragments/`: SMPC secret shares
-  - Metrics files: energy, communication, time tracking
+- **Model Management**: Centralized through `utils/model_manager.py` with clean directory structure:
+
+  ```text
+  results/[experiment_name]/
+  ├── models/
+  │   ├── clients/round_XXX/        # Individual client models per round
+  │   ├── global/                   # Aggregated global models
+  │   ├── clusters/round_XXX/       # Cluster-level aggregations
+  │   └── fragments/round_XXX/      # SMPC secret shares
+  ├── logs/                         # Training and experiment logs
+  ├── metrics/                      # Energy, communication, time tracking
+  └── config.json                   # Experiment configuration
+  ```
+
+- **ModelManager Features**:
+  - Structured model saving with consistent metadata
+  - Automatic directory creation and management
+  - Support for client, global, cluster, and fragment models
+  - Gradient saving for attack evaluation
+  - Centralized experiment tracking
 
 - **Metrics Tracking**: `utils/system_metrics.py` provides:
   - Energy consumption via pyRAPL/pynvml
@@ -98,13 +112,15 @@ This is a privacy-preserving federated learning framework implementing cluster s
   - Privacy budget tracking across rounds
 
 ### Data Flow
-```
+
+```text
 Clients → Local Training → SMPC Encoding → Cluster Aggregation → Node Aggregation → SMPC Decoding → Global Model
     ↑                                                                                                      ↓
     └──────────────────────────────── Broadcast Updated Global Model ──────────────────────────────────────┘
 ```
 
 ### Privacy Mechanisms
+
 - **Cluster Shuffling**: Dynamic client-cluster reassignment each round prevents long-term inference
 - **SMPC**: Secret sharing prevents individual gradient exposure during aggregation
 - **Differential Privacy**: Calibrated noise addition provides formal privacy guarantees

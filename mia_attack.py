@@ -110,7 +110,7 @@ def attack_model_fn():
 
 
 def load_pytorch_model(npz_path):
-    """Load PyTorch model weights from .npz file"""
+    """Load PyTorch model weights from .pt file"""
     try:
         data = np.load(npz_path)
         # Convert numpy arrays to torch tensors
@@ -293,13 +293,13 @@ def demo(argv):
 def demo_with_converted_model(argv):
     del argv  # Unused.
 
-    # Load and convert your PyTorch model
-    model_path = "results/CFL/global_models/node_n1_round_10_global_model.npz"
+    # Load PyTorch model using new structure
+    model_path = "results/cifar10_smpc_c6_r10/models/global/round_010_global.pt"
     
     try:
-        # First, let's inspect the .npz file
-        data = np.load(model_path)
-        print("Available keys in the .npz file:", data.files)
+        # Load the .pt file
+        data = torch.load(model_path, map_location='cpu')
+        print("Available keys in the .pt file:", list(data.keys()))
         
         # Convert the model
         converted_model = create_tf_model_from_pytorch(model_path, model_type="SimpleNet")

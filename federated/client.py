@@ -31,6 +31,9 @@ class Client:
         self.connections = {}
 
         self.save_results = save_results
+        self.model_manager = kwargs.get('model_manager')
+        if self.model_manager is None:
+            raise ValueError("ModelManager is mandatory for Client. Cannot create Client without ModelManager.")
 
         private_key_path = f"keys/{id}_private_key.pem"
         public_key_path = f"keys/{id}_public_key.pem"
@@ -43,6 +46,10 @@ class Client:
         x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=42,
                                                           stratify=None)
 
+        # Filter out Client-specific kwargs before passing to FlowerClient
+        flower_kwargs = {k: v for k, v in kwargs.items() 
+                        if k not in ['model_manager', 'metrics_tracker']}
+
         self.flower_client = FlowerClient.client(
             x_train=x_train,
             x_val=x_val,
@@ -50,7 +57,7 @@ class Client:
             y_train=y_train,
             y_val=y_val,
             y_test=y_test,
-            **kwargs
+            **flower_kwargs
         )
 
         self.metrics_tracker = kwargs.get('metrics_tracker')
@@ -118,7 +125,11 @@ class Client:
                 f"val: {metrics['val_loss']} {metrics['val_acc']} "
                 f"test: {test_metrics['test_loss']} {test_metrics['test_acc']}\n")
         
-        # Store training metrics for potential gradient saving
+        # Store comprehensive training metrics for ModelManager
+        self.last_train_loss = metrics.get('train_loss', 0.0)
+        self.last_train_acc = metrics.get('train_acc', 0.0)
+        self.last_val_loss = metrics.get('val_loss', None)
+        self.last_val_acc = metrics.get('val_acc', None)
         self.last_loss = test_metrics['test_loss']
         self.last_accuracy = test_metrics['test_acc']
         
@@ -264,21 +275,22 @@ class Client:
             )
         self.connections[client_id] = {"address": ("127.0.0.1", address), "public_key": public_key}
 
-    def save_client_model(self, round_num, model_weights=None, save_gradients=False):
+    def save_client_model(self, round_num, model_weights=None, save_gradients=False, experiment_config=None):
         """
-        Save client model and optionally gradients in .pt format
+        Save client model and optionally gradients using ModelManager
         
         Args:
             round_num: Current training round number
             model_weights: Model weights to save (if None, gets from flower_client)
             save_gradients: Whether to save gradients for attack evaluation
+            experiment_config: Experiment configuration for metadata
         """
+        if not self.model_manager:
+            print(f"[Client {self.id}] ERROR: No ModelManager available. Cannot save model.")
+            return
+            
         if model_weights is None:
             model_weights = self.flower_client.get_parameters({})
-        
-        # Create client model directory
-        client_model_dir = os.path.join(self.save_results, "client_models")
-        os.makedirs(client_model_dir, exist_ok=True)
         
         # Convert weights to state dict format
         model_state = {}
@@ -293,56 +305,59 @@ class Client:
                 else:
                     model_state[f'layer_{i}'] = weight
         
-        # Save client model
-        client_data = {
-            'round': round_num,
-            'client_id': self.id,
-            'model_state': model_state,
-            'final_loss': getattr(self, 'last_loss', 0.0),
-            'final_accuracy': getattr(self, 'last_accuracy', 0.0),
-            'timestamp': time.time()
+        # Prepare training metrics
+        training_metrics = {
+            'train_loss': getattr(self, 'last_train_loss', 0.0),
+            'train_acc': getattr(self, 'last_train_acc', 0.0),
+            'val_loss': getattr(self, 'last_val_loss', None),
+            'val_acc': getattr(self, 'last_val_acc', None),
+            'test_loss': getattr(self, 'last_loss', 0.0),
+            'test_acc': getattr(self, 'last_accuracy', 0.0),
+            'len_train': getattr(self.flower_client, 'len_train', 0)
         }
         
-        model_filename = os.path.join(client_model_dir, f"c{self.id}_round_{round_num}_model.pt")
-        torch.save(client_data, model_filename)
-        print(f"[Client {self.id}] Saved model to {model_filename}")
+        # Use experiment_config from parameter or create default
+        if experiment_config is None:
+            experiment_config = {
+                'arch': getattr(self.flower_client, 'model_choice', 'unknown'),
+                'name_dataset': 'unknown',
+                'num_classes': 10,
+                'n_epochs': getattr(self.flower_client, 'epochs', 1),
+                'lr': getattr(self.flower_client, 'learning_rate', 0.001),
+                'diff_privacy': getattr(self.flower_client, 'dp', False),
+                'clustering': len(self.connections) > 0,
+                'type_ss': self.type_ss,
+                'threshold': self.threshold
+            }
         
-        # Save gradients if requested
+        # Prepare gradients if needed
+        gradients = None
+        gradient_metadata = None
         if save_gradients and hasattr(self, 'last_gradients') and self.last_gradients is not None:
-            self._save_gradients(round_num, model_state)
-    
-    def _save_gradients(self, round_num, model_state):
-        """Save gradients for attack evaluation"""
-        gradient_dir = os.path.join(self.save_results, "gradient_inversion")
-        os.makedirs(gradient_dir, exist_ok=True)
+            gradients = self.last_gradients
+            gradient_metadata = {
+                'batch_indices': getattr(self, 'last_batch_indices', []),
+                'batch_labels': getattr(self, 'last_batch_labels', torch.empty(0)),
+                'batch_images': getattr(self, 'last_batch_images', torch.empty(0)),
+                'grad_norm': getattr(self, 'last_grad_norm', 0.0),
+                'model_architecture': experiment_config.get('arch', 'unknown'),
+                'dataset': experiment_config.get('name_dataset', 'unknown')
+            }
         
-        # Calculate gradient norm
-        grad_norm = 0.0
-        if self.last_gradients:
-            grad_norms = [g.norm().item() if hasattr(g, 'norm') else 0.0 for g in self.last_gradients]
-            grad_norm = sum(grad_norms) / len(grad_norms) if grad_norms else 0.0
+        # Save using ModelManager
+        saved_paths = self.model_manager.save_client_model(
+            client_id=self.id,
+            round_num=round_num,
+            model_state=model_state,
+            training_metrics=training_metrics,
+            experiment_config=experiment_config,
+            gradients=gradients,
+            gradient_metadata=gradient_metadata
+        )
         
-        gradient_data = {
-            'round': round_num,
-            'client_id': self.id,
-            'gradients': [g.clone().detach().cpu() if hasattr(g, 'clone') else g 
-                         for g in (self.last_gradients or [])],
-            'loss': getattr(self, 'last_loss', 0.0),
-            'accuracy': getattr(self, 'last_accuracy', 0.0),
-            'grad_norm': grad_norm,
-            'model_state': model_state,
-            'batch_indices': getattr(self, 'last_batch_indices', []),
-            'batch_labels': getattr(self, 'last_batch_labels', torch.empty(0)),
-            'batch_images': getattr(self, 'last_batch_images', torch.empty(0)),
-            'model_architecture': 'unknown',  # Will be filled by main training loop
-            'num_classes': 10,  # Default, will be updated by main training loop
-            'dataset': 'unknown',  # Will be filled by main training loop
-            'timestamp': time.time()
-        }
-        
-        gradient_filename = os.path.join(gradient_dir, f"round_{round_num}_client_{self.id}.pt")
-        torch.save(gradient_data, gradient_filename)
-        print(f"[Client {self.id}] Saved gradients to {gradient_filename}")
+        print(f"[Client {self.id}] Saved model to {saved_paths['model']}")
+        if 'gradients' in saved_paths:
+            print(f"[Client {self.id}] Saved gradients to {saved_paths['gradients']}")
     
     def capture_gradients_from_model(self, model, loss_fn, batch_images, batch_labels):
         """

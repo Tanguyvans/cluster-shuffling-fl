@@ -43,21 +43,9 @@ def train(node_id, model, train_loader, val_loader, epochs, loss_fn, optimizer, 
                 # Create directory if it doesn't exist
                 os.makedirs(os.path.dirname(save_model), exist_ok=True)
                 
-                # Save as .npz format (similar to global models)
-                if save_model.endswith('.npz'):
-                    # Convert state_dict to numpy and save as .npz
-                    state_dict = model.state_dict()
-                    weights_dict = {}
-                    for name, param in state_dict.items():
-                        weights_dict[f'model.{name}'] = param.detach().cpu().numpy()
-                    
-                    with open(save_model, "wb") as fi:
-                        np.savez(fi, **weights_dict)
-                    print(f"Model improved and saved to {save_model} (npz format)")
-                else:
-                    # Original PyTorch format
-                    torch.save(model.state_dict(), save_model)
-                    print(f"Model improved and saved to {save_model} (pytorch format)")
+                # Save in PyTorch .pt format only
+                torch.save(model.state_dict(), save_model)
+                print(f"Model improved and saved to {save_model} (pytorch format)")
         else:
             epochs_no_improve += 1
 

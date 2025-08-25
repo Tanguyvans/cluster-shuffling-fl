@@ -72,7 +72,10 @@ def start_server(host, port, handle_message, num_node):
 
 
 class Node:
-    def __init__(self, id, host, port, test, save_results, check_usefulness=True, coef_useful=1.05, tolerance_ceil=0.06, metrics_tracker=None, **kwargs):
+    def __init__(self, id, host, port, test, save_results, check_usefulness=True, coef_useful=1.05, tolerance_ceil=0.06, metrics_tracker=None, model_manager=None, **kwargs):
+        if model_manager is None:
+            raise ValueError("ModelManager is mandatory for Node. Cannot create Node without ModelManager.")
+            
         self.id = id
         self.host = host
         self.port = port
@@ -88,6 +91,7 @@ class Node:
         self.tolerance_ceil = tolerance_ceil
 
         self.metrics_tracker = metrics_tracker
+        self.model_manager = model_manager
         self.received_weights_info = [] # Initialize to store (weights, num_examples, client_id)
 
         private_key_path = f"keys/{id}_private_key.pem"
@@ -160,17 +164,17 @@ class Node:
         params_list = []
         for block in self.blockchain.blocks[::-1]:
             if block.model_type == "update":
-                if block.storage_reference.endswith('.pt'):
-                    loaded_data = torch.load(block.storage_reference, map_location='cpu')
+                # Only support .pt format
+                loaded_data = torch.load(block.storage_reference, map_location='cpu')
+                if 'model_state' in loaded_data:
                     model_state = loaded_data['model_state']
                     loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
                                     for name, val in model_state.items() if 'bn' not in name]
                     len_dataset_val = loaded_data.get('len_dataset', 10)
                 else:
-                    # Fallback for .npz files
-                    loaded_weights_dict = np.load(block.storage_reference)
-                    loaded_weights = [val for name, val in loaded_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
-                    len_dataset_val = loaded_weights_dict.get('len_dataset', 10)
+                    # Fallback for direct weights format
+                    loaded_weights = self.flower_client.get_parameters({})
+                    len_dataset_val = 10
                 
                 loaded_weights = (loaded_weights, len_dataset_val)
                 params_list.append(loaded_weights)
@@ -189,17 +193,16 @@ class Node:
         return weights_dict
 
     def broadcast_model_to_clients(self, filename):
-        # Load .pt file instead of .npz
-        if filename.endswith('.pt'):
-            loaded_data = torch.load(filename, map_location='cpu')
+        # Load .pt file (only supported format)
+        loaded_data = torch.load(filename, map_location='cpu')
+        if 'model_state' in loaded_data:
             model_state = loaded_data['model_state']
             # Convert to list format for compatibility with existing client code
             loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
                             for name, val in model_state.items() if 'bn' not in name]
         else:
-            # Fallback to numpy loading for compatibility
-            loaded_weights_dict = np.load(filename)
-            loaded_weights = [val for name, val in loaded_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
+            # Fallback for direct weights format
+            loaded_weights = self.flower_client.get_parameters({})
 
         for k, v in self.clients.items():
             print("sending to client", k)
@@ -222,44 +225,43 @@ class Node:
             client_socket.close()
 
     def create_first_global_model(self):
+        if not self.model_manager:
+            print(f"[Node {self.id}] ERROR: No ModelManager available. Cannot create initial global model.")
+            return
+            
         weights_dict = self.flower_client.get_dict_params({})
-        weights_dict['len_dataset'] = 0
-
-        global_model_dir = os.path.join(self.save_results, "global_models")
-        os.makedirs(global_model_dir, exist_ok=True)
+        model_state = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                      for k, v in weights_dict.items() if k != 'len_dataset'}
         
-        # Use only .pt format
-        pt_filename = os.path.join(global_model_dir, f"node_{self.id}_round_0_global_model.pt")
-        
-        self.global_params_directory = pt_filename
-        
-        # Track storage
-        if self.metrics_tracker:
-            file_size = sys.getsizeof(pickle.dumps(weights_dict)) / (1024 * 1024)  # Convert to MB
-            self.metrics_tracker.record_storage_communication(0, file_size, 'save')
-        
-        # Save only PT format
-        pt_data = {
-            'round': 0,
-            'model_state': {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
-                           for k, v in weights_dict.items() if k != 'len_dataset'},
-            'len_dataset': weights_dict.get('len_dataset', 0),
-            'timestamp': time.time(),
-            'node_id': self.id
+        # Prepare experiment config - get from first client or use defaults
+        experiment_config = {
+            'arch': 'unknown',  # Will be filled from kwargs if available
+            'name_dataset': 'unknown',
+            'num_classes': 10,
+            'diff_privacy': False,
+            'clustering': False,
         }
-        torch.save(pt_data, pt_filename)
         
-        print(f"[Node {self.id}] Saved first global model to {pt_filename}")
-
-        self.broadcast_model_to_clients(pt_filename)
+        saved_paths = self.model_manager.save_global_model(
+            node_id=self.id,
+            round_num=0,
+            model_state=model_state,
+            contributors=[],  # Initial model has no contributors
+            experiment_config=experiment_config,
+            aggregation_method="initial",
+            test_metrics=None
+        )
+        
+        self.global_params_directory = saved_paths['model']
+        print(f"[Node {self.id}] Saved first global model to {saved_paths['model']}")
+        self.broadcast_model_to_clients(self.global_params_directory)
 
     def create_global_model(self, models_arg, index, two_step=False):
+        if not self.model_manager:
+            print(f"[Node {self.id}] ERROR: No ModelManager available. Cannot create global model for round {index}.")
+            return
+            
         processing_list = []  # This will hold tuples of (client_weight_params, client_num_examples, original_client_id)
-        
-        global_model_dir = os.path.join(self.save_results, "global_models")
-        os.makedirs(global_model_dir, exist_ok=True)
-        # Define filename for the new global model early - use .pt format
-        new_global_model_filename = os.path.join(global_model_dir, f"node_{self.id}_round_{index}_global_model.pt")
 
         if models_arg:
             # If models are passed directly, create placeholder IDs and default num_examples
@@ -279,21 +281,62 @@ class Node:
         if not processing_list:
             print(f"\n[Node {self.id}] No client models to process for round {index}. Keeping current global model.")
             if os.path.exists(self.global_params_directory):
-                shutil.copy2(self.global_params_directory, new_global_model_filename)
-                self.global_params_directory = new_global_model_filename
-                print(f"[Node {self.id}] Copied previous global model to {new_global_model_filename}")
+                # Load previous model and re-save it with current round number
+                previous_data = torch.load(self.global_params_directory, map_location='cpu')
+                if 'model_state' in previous_data:
+                    model_state = previous_data['model_state']
+                else:
+                    # Convert old format to new
+                    weights_dict = self.flower_client.get_dict_params({})
+                    model_state = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                                  for k, v in weights_dict.items() if k != 'len_dataset'}
+                
+                experiment_config = {
+                    'arch': 'unknown',
+                    'name_dataset': 'unknown', 
+                    'num_classes': 10,
+                    'diff_privacy': False,
+                    'clustering': len(self.clusters) > 0 if hasattr(self, 'clusters') else False,
+                }
+                
+                saved_paths = self.model_manager.save_global_model(
+                    node_id=self.id,
+                    round_num=index,
+                    model_state=model_state,
+                    contributors=[],
+                    experiment_config=experiment_config,
+                    aggregation_method="no_new_models",
+                    test_metrics={}
+                )
+                
+                self.global_params_directory = saved_paths['model']
+                print(f"[Node {self.id}] Copied previous global model to round {index}")
             else: 
-                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory}. Creating a new one for round {index}.")
-                # This fallback might create m0 again, then copy. Better to ensure it saves as new_global_model_filename.
-                # For simplicity, we'll call a modified first_global_model or similar logic here to save with the correct round number.
-                # Simplified fallback: create a new initial model and save it with the current round's filename.
+                print(f"[Node {self.id}] ERROR: Previous global model not found. Creating a new one for round {index}.")
                 weights_dict = self.flower_client.get_dict_params({})
-                weights_dict['len_dataset'] = 0
-                with open(new_global_model_filename, "wb") as fi:
-                    np.savez(fi, **weights_dict)
-                self.global_params_directory = new_global_model_filename
-                print(f"[Node {self.id}] Created and saved new initial global model for round {index} at {new_global_model_filename}")
-
+                model_state = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                              for k, v in weights_dict.items() if k != 'len_dataset'}
+                
+                experiment_config = {
+                    'arch': 'unknown',
+                    'name_dataset': 'unknown', 
+                    'num_classes': 10,
+                    'diff_privacy': False,
+                    'clustering': len(self.clusters) > 0 if hasattr(self, 'clusters') else False,
+                }
+                
+                saved_paths = self.model_manager.save_global_model(
+                    node_id=self.id,
+                    round_num=index,
+                    model_state=model_state,
+                    contributors=[],
+                    experiment_config=experiment_config,
+                    aggregation_method="initial_fallback",
+                    test_metrics={}
+                )
+                
+                self.global_params_directory = saved_paths['model']
+                print(f"[Node {self.id}] Created and saved new initial global model for round {index}")
 
             self.broadcast_model_to_clients(self.global_params_directory)
             self.received_weights_info = [] # Clear received weights for the next round
@@ -303,22 +346,16 @@ class Node:
         useful_client_ids_log = []
         not_useful_client_ids_log = []
 
-        # Load current global model for comparison
-        if self.global_params_directory.endswith('.pt'):
-            # Load PyTorch format
-            global_model_data = torch.load(self.global_params_directory, map_location='cpu')
-            if 'model_state' in global_model_data:
-                model_state = global_model_data['model_state']
-                global_weights_params = [val.numpy() if isinstance(val, torch.Tensor) else val 
-                                       for key, val in model_state.items() 
-                                       if 'bn' not in key and 'len_dataset' not in key]
-            else:
-                # Fallback: assume direct weight list format
-                global_weights_params = self.flower_client.get_parameters({})
+        # Load current global model for comparison (PT format only)
+        global_model_data = torch.load(self.global_params_directory, map_location='cpu')
+        if 'model_state' in global_model_data:
+            model_state = global_model_data['model_state']
+            global_weights_params = [val.numpy() if isinstance(val, torch.Tensor) else val 
+                                   for key, val in model_state.items() 
+                                   if 'bn' not in key and 'len_dataset' not in key]
         else:
-            # Load NumPy format (legacy)
-            global_weights_dict = np.load(self.global_params_directory)
-            global_weights_params = [val for name, val in global_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
+            # Fallback: assume direct weight list format
+            global_weights_params = self.flower_client.get_parameters({})
         
         # Temporary directory for client models during usefulness check
         temp_model_eval_dir = os.path.join(self.save_results, "temp_client_models_for_eval")
@@ -328,14 +365,20 @@ class Node:
         for client_weight_params, client_num_examples, original_client_id in processing_list:
             if self.check_usefulness:
                 # Sauvegarder temporairement le modèle client pour évaluation
-                temp_filename = os.path.join(temp_model_eval_dir, f"temp_{original_client_id}_round_{index}.npz")
+                temp_filename = os.path.join(temp_model_eval_dir, f"temp_{original_client_id}_round_{index}.pt")
                 
                 self.flower_client.set_parameters(client_weight_params)
                 temp_weights_dict = self.flower_client.get_dict_params({})
-                temp_weights_dict['len_dataset'] = client_num_examples 
                 
-                with open(temp_filename, "wb") as fi:
-                    np.savez(fi, **temp_weights_dict)
+                temp_pt_data = {
+                    'round': index,
+                    'model_state': {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                                   for k, v in temp_weights_dict.items()},
+                    'len_dataset': client_num_examples,
+                    'timestamp': time.time(),
+                    'client_id': original_client_id
+                }
+                torch.save(temp_pt_data, temp_filename)
 
                 if self.is_update_useful(temp_filename, list(self.clients.keys())): 
                     useful_weights_for_agg.append((client_weight_params, client_num_examples))
@@ -381,44 +424,96 @@ class Node:
             weights_dict = self.flower_client.get_dict_params({})
             weights_dict['len_dataset'] = 0 
 
-            # Use only .pt format
-            self.global_params_directory = new_global_model_filename
-            
-            if self.metrics_tracker:
-                file_size = sys.getsizeof(pickle.dumps(weights_dict)) / (1024 * 1024)
-                self.metrics_tracker.record_storage_communication(index, file_size, 'save')
-            
-            # Save only PT format
-            pt_data = {
-                'round': index,
-                'model_state': {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
-                               for k, v in weights_dict.items() if k != 'len_dataset'},
-                'len_dataset': weights_dict.get('len_dataset', 0),
-                'timestamp': time.time(),
-                'node_id': self.id,
-                'metrics': metrics
-            }
-            torch.save(pt_data, new_global_model_filename)
-            
-            print(f"[Node {self.id}] Saved aggregated global model for round {index} to {new_global_model_filename}")
+            # Save using ModelManager
+            if self.model_manager:
+                model_state = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                              for k, v in weights_dict.items() if k != 'len_dataset'}
+                
+                experiment_config = {
+                    'arch': 'unknown',
+                    'name_dataset': 'unknown', 
+                    'num_classes': 10,
+                    'diff_privacy': False,
+                    'clustering': len(self.clusters) > 0 if hasattr(self, 'clusters') else False,
+                }
+                
+                saved_paths = self.model_manager.save_global_model(
+                    node_id=self.id,
+                    round_num=index,
+                    model_state=model_state,
+                    contributors=useful_client_ids_log,
+                    experiment_config=experiment_config,
+                    aggregation_method="fedavg_with_usefulness_check",
+                    test_metrics={'test_loss': metrics.get('test_loss'), 'test_acc': metrics.get('test_acc')}
+                )
+                
+                self.global_params_directory = saved_paths['model']
+                print(f"[Node {self.id}] Saved aggregated global model for round {index} to {saved_paths['model']}")
+            else:
+                print(f"[Node {self.id}] ERROR: No ModelManager available. Cannot save global model for round {index}.")
+                return
 
             with open(self.save_results + "output.txt", "a") as fi:
                 fi.write(f"Round {index}, Global aggregation after usefulness check: {metrics}\n")
         else:
             print(f"\n[Node {self.id}] No useful client models found for round {index}. Keeping current global model.")
             if os.path.exists(self.global_params_directory):
-                shutil.copy2(self.global_params_directory, new_global_model_filename)
-                self.global_params_directory = new_global_model_filename
-                print(f"[Node {self.id}] Copied previous global model to {new_global_model_filename} as no useful models found.")
+                # Load previous model and re-save it with current round number
+                previous_data = torch.load(self.global_params_directory, map_location='cpu')
+                if 'model_state' in previous_data:
+                    model_state = previous_data['model_state']
+                else:
+                    # Convert old format to new
+                    weights_dict = self.flower_client.get_dict_params({})
+                    model_state = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                                  for k, v in weights_dict.items() if k != 'len_dataset'}
+                
+                experiment_config = {
+                    'arch': 'unknown',
+                    'name_dataset': 'unknown', 
+                    'num_classes': 10,
+                    'diff_privacy': False,
+                    'clustering': len(self.clusters) > 0 if hasattr(self, 'clusters') else False,
+                }
+                
+                saved_paths = self.model_manager.save_global_model(
+                    node_id=self.id,
+                    round_num=index,
+                    model_state=model_state,
+                    contributors=useful_client_ids_log,
+                    experiment_config=experiment_config,
+                    aggregation_method="no_useful_models",
+                    test_metrics={}
+                )
+                
+                self.global_params_directory = saved_paths['model']
+                print(f"[Node {self.id}] Copied previous global model to round {index} as no useful models found.")
             else: 
-                print(f"[Node {self.id}] ERROR: Previous global model not found at {self.global_params_directory} and no useful models.")
-                # Fallback: create a new initial model and save it with the current round's filename.
+                print(f"[Node {self.id}] ERROR: Previous global model not found and no useful models.")
                 weights_dict = self.flower_client.get_dict_params({})
-                weights_dict['len_dataset'] = 0
-                with open(new_global_model_filename, "wb") as fi:
-                    np.savez(fi, **weights_dict)
-                self.global_params_directory = new_global_model_filename
-                print(f"[Node {self.id}] Created and saved new initial global model for round {index} at {new_global_model_filename}")
+                model_state = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v 
+                              for k, v in weights_dict.items() if k != 'len_dataset'}
+                
+                experiment_config = {
+                    'arch': 'unknown',
+                    'name_dataset': 'unknown', 
+                    'num_classes': 10,
+                    'diff_privacy': False,
+                    'clustering': len(self.clusters) > 0 if hasattr(self, 'clusters') else False,
+                }
+                
+                saved_paths = self.model_manager.save_global_model(
+                    node_id=self.id,
+                    round_num=index,
+                    model_state=model_state,
+                    contributors=useful_client_ids_log,
+                    experiment_config=experiment_config,
+                    aggregation_method="emergency_fallback",
+                    test_metrics={}
+                )
+                
+                self.global_params_directory = saved_paths['model']
+                print(f"[Node {self.id}] Created and saved new initial global model for round {index}")
 
 
         self.broadcast_model_to_clients(self.global_params_directory)
@@ -460,8 +555,15 @@ class Node:
         if self.metrics_tracker:
             self.metrics_tracker.record_storage_communication(0, model_size, 'load')
 
-        loaded_weights_dict = np.load(model_directory)
-        loaded_weights = [val for name, val in loaded_weights_dict.items() if 'bn' not in name and 'len_dataset' not in name]
+        model_data = torch.load(model_directory, map_location='cpu')
+        if 'model_state' in model_data:
+            model_state = model_data['model_state']
+            loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
+                            for key, val in model_state.items() 
+                            if 'bn' not in key and 'len_dataset' not in key]
+        else:
+            # Fallback for direct weights format
+            loaded_weights = self.flower_client.get_parameters({})
         test_metrics = self.flower_client.evaluate(loaded_weights, {'name': f'Node {self.id}_Clusters {participants}'})
         
         print(f"In evaluate Model (node: {self.id}) \tTest Loss: {test_metrics['test_loss']:.4f}, "
