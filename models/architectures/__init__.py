@@ -4,8 +4,9 @@ from .mobilenet import MobileNet
 from .squeeze_net import SqueezeNet
 from .resnet import ResNet
 from .shuffle_net import ShuffleNet
+from .conv_net import ConvNet
 
 __all__ = [
     'SimpleNet', 'EfficientNet', 'MobileNet', 
-    'SqueezeNet', 'ResNet', 'ShuffleNet'
+    'SqueezeNet', 'ResNet', 'ShuffleNet', 'ConvNet'
 ]

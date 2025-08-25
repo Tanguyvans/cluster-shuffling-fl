@@ -6,6 +6,7 @@ from .architectures.mobilenet import MobileNet
 from .architectures.squeeze_net import SqueezeNet
 from .architectures.resnet import ResNet
 from .architectures.shuffle_net import ShuffleNet
+from .architectures.conv_net import ConvNet
 
 class Net(nn.Module):
     """
@@ -35,6 +36,10 @@ class Net(nn.Module):
             if '_' in arch:
                 size = arch.split('_')[1]
             self.model = ShuffleNet(num_classes=num_classes, size=size, pretrained=pretrained)
+        elif "convnet" in arch.lower():
+            # Use width=64 to match inversefed default, num_channels=3 for CIFAR-10
+            width = 64 if input_size == (32, 32) else 32  # Adjust width based on input size
+            self.model = ConvNet(width=width, num_classes=num_classes, num_channels=3)
         else:
             raise NotImplementedError("The architecture is not implemented")
 
