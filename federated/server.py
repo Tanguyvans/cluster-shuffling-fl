@@ -413,11 +413,32 @@ class Node:
             print(f"\n[Node {self.id}] Starting final aggregation with {len(useful_weights_for_agg)} useful client models.")
             print(f"[Node {self.id}] Useful models from clients: {', '.join(sorted(useful_client_ids_log))}")
             
-            useful_weights_for_agg.append((global_weights_params, 20)) 
-            print(f"[Node {self.id}] Added current global model to the aggregation set (effective models for agg: {len(useful_weights_for_agg)}).")
+            # Import config for aggregation method
+            from config import settings
+            aggregation_method = settings.get('aggregation_method', 'weights')
             
-            aggregated_weights = aggregate(useful_weights_for_agg)
-            print(f"[Node {self.id}] Completed aggregation of useful models and global model.")
+            if aggregation_method == 'gradients':
+                print(f"[Node {self.id}] Using gradient-based aggregation")
+                # Note: When clustering=False, we still receive model weights, not gradients
+                # The gradients are saved separately for attack evaluation
+                # For now, fall back to weight-based aggregation when clustering is disabled
+                from config import settings
+                if settings.get('clustering', False):
+                    aggregated_weights = self.aggregate_gradients(useful_weights_for_agg)
+                    agg_method_desc = "gradient_based_fedavg"
+                else:
+                    print(f"[Node {self.id}] Note: Clustering disabled, using weight aggregation (gradients saved separately)")
+                    useful_weights_for_agg.append((global_weights_params, 20))
+                    aggregated_weights = aggregate(useful_weights_for_agg)
+                    agg_method_desc = "weights_fedavg_gradients_saved"
+            else:
+                print(f"[Node {self.id}] Using traditional weight-based aggregation")
+                useful_weights_for_agg.append((global_weights_params, 20)) 
+                print(f"[Node {self.id}] Added current global model to the aggregation set (effective models for agg: {len(useful_weights_for_agg)}).")
+                aggregated_weights = aggregate(useful_weights_for_agg)
+                agg_method_desc = "fedavg_with_usefulness_check"
+            
+            print(f"[Node {self.id}] Completed {aggregation_method}-based aggregation.")
             metrics = self.flower_client.evaluate(aggregated_weights, {})
 
             self.flower_client.set_parameters(aggregated_weights)
@@ -443,7 +464,7 @@ class Node:
                     model_state=model_state,
                     contributors=useful_client_ids_log,
                     experiment_config=experiment_config,
-                    aggregation_method="fedavg_with_usefulness_check",
+                    aggregation_method=agg_method_desc,
                     test_metrics={'test_loss': metrics.get('test_loss'), 'test_acc': metrics.get('test_acc')}
                 )
                 
@@ -624,3 +645,57 @@ class Node:
                 # To include them, you might append to the last cluster or handle differently based on requirements.
 
         print(f"[Node {self.id}] Generated clusters: {self.clusters}")
+    
+    def aggregate_gradients(self, client_gradients_list, learning_rate=0.01):
+        """
+        Aggregate gradients from multiple clients and apply them to the global model.
+        
+        Args:
+            client_gradients_list: List of (gradients, num_examples, client_id) tuples
+            learning_rate: Learning rate for applying gradients to global model
+            
+        Returns:
+            Updated model parameters (same format as traditional weight aggregation)
+        """
+        print(f"[Node {self.id}] Starting gradient-based aggregation with {len(client_gradients_list)} clients")
+        
+        if not client_gradients_list:
+            # Return current global model parameters if no gradients to aggregate
+            return self.flower_client.get_parameters({})
+        
+        # Extract gradients (first element of each tuple)
+        all_gradients = [gradients for gradients, _, _ in client_gradients_list]
+        
+        # Average the gradients across all clients
+        averaged_gradients = []
+        num_layers = len(all_gradients[0])
+        
+        for layer_idx in range(num_layers):
+            # Stack gradients for this layer from all clients
+            layer_gradients = [client_grads[layer_idx] for client_grads in all_gradients]
+            # Convert to numpy if needed and stack
+            if isinstance(layer_gradients[0], torch.Tensor):
+                layer_gradients = [grad.cpu().numpy() for grad in layer_gradients]
+            
+            # Average across clients
+            stacked_gradients = np.stack(layer_gradients, axis=0)
+            averaged_gradient = np.mean(stacked_gradients, axis=0)
+            averaged_gradients.append(averaged_gradient)
+        
+        # Get current global model parameters
+        current_params = self.flower_client.get_parameters({})
+        
+        # Apply averaged gradients to current parameters
+        updated_params = []
+        for param, avg_grad in zip(current_params, averaged_gradients):
+            if isinstance(param, np.ndarray):
+                # Gradient descent update: param = param - learning_rate * gradient
+                updated_param = param - learning_rate * avg_grad
+            else:
+                updated_param = param  # Skip non-array parameters
+            updated_params.append(updated_param)
+        
+        print(f"[Node {self.id}] Applied averaged gradients with learning rate {learning_rate}")
+        print(f"[Node {self.id}] Updated {len(updated_params)} parameter tensors")
+        
+        return updated_params

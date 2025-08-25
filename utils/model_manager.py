@@ -115,22 +115,33 @@ class ModelManager:
             'metadata': metadata_path
         }
         
-        # Save gradients if provided
+        # Save gradients if provided (format similar to simple_federated.py)
         if gradients is not None:
             gradients_data = {
                 'round': round_num,
                 'client_id': client_id,
                 'gradients': [g.cpu() for g in gradients],
+                'loss': gradient_metadata.get('loss', 0.0) if gradient_metadata else 0.0,
+                'accuracy': gradient_metadata.get('accuracy', 0.0) if gradient_metadata else 0.0,
+                'model_state': cpu_model_state,
+                'batch_indices': gradient_metadata.get('batch_indices', []) if gradient_metadata else [],
+                'batch_labels': gradient_metadata.get('batch_labels', torch.empty(0)).cpu() if gradient_metadata else torch.empty(0),
+                'batch_images': gradient_metadata.get('batch_images', torch.empty(0)).cpu() if gradient_metadata else torch.empty(0),
+                'grad_norm': gradient_metadata.get('grad_norm', 0.0) if gradient_metadata else 0.0,
                 'timestamp': time.time(),
-                'experiment_name': self.experiment_name
+                'experiment_name': self.experiment_name,
+                # Additional metadata for attack compatibility
+                'model_architecture': gradient_metadata.get('model_architecture', 'unknown') if gradient_metadata else 'unknown',
+                'dataset': gradient_metadata.get('dataset', 'unknown') if gradient_metadata else 'unknown'
             }
-            
-            if gradient_metadata:
-                gradients_data.update(gradient_metadata)
             
             gradients_path = self.paths.get_client_gradients_path(round_num, client_id)
             torch.save(gradients_data, gradients_path)
             saved_paths['gradients'] = gradients_path
+            
+            print(f"[ModelManager] Saved gradients for client {client_id}, round {round_num}")
+            print(f"[ModelManager] Gradient file: {gradients_path}")
+            print(f"[ModelManager] Gradient batch shape: {gradients_data['batch_images'].shape if gradients_data['batch_images'].numel() > 0 else 'empty'}")
             
         return saved_paths
     

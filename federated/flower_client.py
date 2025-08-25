@@ -122,6 +122,9 @@ class FlowerClient(fl.client.NumPyClient):
         optimizer = choice_optimizer_fct(self.model, choice_optim=self.choice_optimizer, lr=self.learning_rate,
                                      weight_decay=1e-6)
         
+        # Check if gradients should be captured for this training session
+        capture_gradients = config.get('capture_gradients', False)
+        
         if self.dp:
             try:
                 # Create privacy engine
@@ -148,11 +151,22 @@ class FlowerClient(fl.client.NumPyClient):
                     self.epochs, self.criterion, optimizer, scheduler, device=self.device,
                     dp=self.dp, delta=self.delta,
                     max_physical_batch_size=int(self.batch_size / 4), privacy_engine=self.privacy_engine,
-                    patience=self.patience, save_model=None, single_batch_training=self.single_batch_training)
+                    patience=self.patience, save_model=None, single_batch_training=self.single_batch_training,
+                    capture_gradients=capture_gradients)
 
         # Model state is already updated in-place by training, no need to reload from file
         best_parameters = self.get_parameters({})
         self.set_parameters(best_parameters)
+        
+        # Store captured gradients if available
+        if capture_gradients and "gradients" in results:
+            self.last_gradients = results["gradients"]
+            self.last_batch_images = results["gradient_batch_images"]
+            self.last_batch_labels = results["gradient_batch_labels"]
+            self.last_loss = results["gradient_loss"]
+            self.last_accuracy = results["gradient_accuracy"]
+            self.last_grad_norm = results["gradient_norm"]
+            print(f"[FlowerClient] Stored gradients for gradient inversion attack evaluation")
         
         # Save results
         if self.save_figure:
