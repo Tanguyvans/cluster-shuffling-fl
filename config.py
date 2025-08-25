@@ -21,6 +21,9 @@ settings = {
     "patience": 3,
     "batch_size": 32,
     "n_epochs": 10,
+    
+    # Single batch training for inference attacks
+    "single_batch_training": True,  # Set to True to train on only one batch per epoch
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
