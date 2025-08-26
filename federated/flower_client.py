@@ -6,6 +6,7 @@ from opacus.validators import ModuleValidator
 from opacus.data_loader import DPDataLoader
 
 from models import Net
+from config import settings
 
 from data.loaders import TensorDataset, DataLoader
 from utils.device import choice_device
@@ -97,6 +98,17 @@ class FlowerClient(fl.client.NumPyClient):
     @classmethod
     def client(cls, x_train, y_train, x_val, y_val, x_test, y_test, **kwargs):
         obj = cls(**kwargs)
+        
+        # Apply balanced class selection if enabled
+        if (settings.get('balanced_class_training', False) and 
+            settings.get('single_batch_training', False)):
+            
+            # Create balanced training set (one sample per class)
+            print(f"[FlowerClient] Applying balanced class training...")
+            x_train_balanced, y_train_balanced = cls._create_balanced_subset(x_train, y_train, len(obj.classes))
+            print(f"[FlowerClient] Balanced training set: {len(x_train_balanced)} samples, classes: {sorted(set(y_train_balanced.tolist()))}")
+            x_train, y_train = x_train_balanced, y_train_balanced
+        
         # Set data loaders
         train_data = TensorDataset(torch.stack(x_train), torch.tensor(y_train))
         val_data = TensorDataset(torch.stack(x_val), torch.tensor(y_val))
@@ -107,6 +119,33 @@ class FlowerClient(fl.client.NumPyClient):
         obj.val_loader = DataLoader(dataset=val_data, batch_size=kwargs['batch_size'], shuffle=True)
         obj.test_loader = DataLoader(dataset=test_data, batch_size=kwargs['batch_size'], shuffle=True)
         return obj
+    
+    @staticmethod
+    def _create_balanced_subset(x_train, y_train, num_classes):
+        """Create a balanced subset with one sample per class (like template)"""
+        x_train_list = x_train if isinstance(x_train, list) else x_train.tolist()
+        y_train_list = y_train if isinstance(y_train, list) else y_train.tolist()
+        
+        # Find one sample per class
+        selected_indices = []
+        selected_labels = set()
+        
+        for i, label in enumerate(y_train_list):
+            if label not in selected_labels:
+                selected_indices.append(i)
+                selected_labels.add(label)
+                if len(selected_indices) == num_classes:
+                    break
+        
+        # Extract selected samples
+        if isinstance(x_train, list):
+            x_balanced = [x_train_list[i] for i in selected_indices]
+        else:
+            x_balanced = [x_train[i] for i in selected_indices]
+            
+        y_balanced = torch.tensor([y_train_list[i] for i in selected_indices])
+        
+        return x_balanced, y_balanced
 
     def get_parameters(self, config):
         return get_parameters(self.model)
