@@ -2,7 +2,6 @@
 /env
 /keys
 /results
-/Data
 /trained_models
 trained_models.npz
 /cluster_shuffling_env
