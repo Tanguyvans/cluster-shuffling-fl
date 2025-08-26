@@ -24,6 +24,7 @@ settings = {
     
     # Single batch training for inference attacks
     "single_batch_training": True,  # Set to True to train on only one batch per epoch
+    "balanced_class_training": True,  # Ensure each client gets one sample per class (like template)
     "number_of_nodes": 1,
     "number_of_clients_per_node": 3,
     "min_number_of_clients_in_cluster": 3,

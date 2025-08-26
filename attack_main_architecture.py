@@ -150,7 +150,12 @@ def attack_client_gradients(exp_dir, round_num, client_id, save_individual=True)
     # Verify gradients by computing fresh ones
     print("Computing fresh gradients for verification...")
     model.zero_grad()
-    target_loss = loss_fn(model(ground_truth), true_labels)
+    target_loss_output = loss_fn(model(ground_truth), true_labels)
+    # Handle tuple output from loss function (loss, _, _)
+    if isinstance(target_loss_output, (tuple, list)):
+        target_loss = target_loss_output[0]
+    else:
+        target_loss = target_loss_output
     fresh_gradients = torch.autograd.grad(target_loss, model.parameters())
     fresh_gradient_norm = torch.stack([g.norm() for g in fresh_gradients]).mean().item()
     print(f"  Fresh gradient norm: {fresh_gradient_norm:.4f}")

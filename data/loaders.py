@@ -17,6 +17,35 @@ NORMALIZE_DICT = {
 }
 
 
+def select_balanced_batch_per_client(dataset, num_classes, seed_offset=0):
+    """
+    Select one sample per class for a single client (like template)
+    Returns indices and labels for balanced training
+    """
+    np.random.seed(42 + seed_offset)
+    selected_indices = []
+    selected_labels = set()
+    
+    # Convert dataset to list for indexing
+    all_indices = list(range(len(dataset)))
+    np.random.shuffle(all_indices)
+    
+    for idx in all_indices:
+        # Get label from dataset
+        if hasattr(dataset, '__getitem__'):
+            _, label = dataset[idx]
+        else:
+            _, label = dataset.dataset[idx]  # Handle subset
+            
+        if label not in selected_labels:
+            selected_indices.append(idx)
+            selected_labels.add(label)
+            if len(selected_indices) == num_classes:
+                break
+    
+    return selected_indices, sorted(selected_labels)
+
+
 def splitting_dataset(dataset, nb_clients):
     random.seed(42)
     
