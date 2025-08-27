@@ -13,6 +13,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from .nn import inn
 import pickle
+import random
 
 def system_startup(args=None, defs=None):
     """Print useful system information."""
