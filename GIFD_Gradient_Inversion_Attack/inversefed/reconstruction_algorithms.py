@@ -759,6 +759,9 @@ class GradientReconstructor():
             elif self.generative_model_name == 'BigGAN':
                 _x = self.invert_biggan(dummy_z, labels, begin_layer, int(steps), i, img_size)
                 self.config['KLD'] = 0
+            else:
+                # For stylegan2_ada and other models, skip intermediate space search
+                continue
             #_x is not in the real image space.
             #TO DO: compute score
             stats = {}

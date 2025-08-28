@@ -23,6 +23,24 @@ python3 run_grad_inv.py --list
 
 # Advanced gradient inversion attack targeting
 python3 run_grad_inv.py --config aggressive --rounds 1 2 --clients c0_1 c0_2
+
+# Run GIFD (Gradient Inversion from Federated Data) attack with generative priors
+# GIFD uses StyleGAN2/BigGAN for high-quality reconstructions via feature-domain optimization
+python3 run_gifd.py --gan stylegan2                # Use StyleGAN2 as generative prior
+python3 run_gifd.py --gan biggan                   # Use BigGAN for ImageNet-like data
+python3 run_gifd.py --gan stylegan2-ada            # Use StyleGAN2-ADA with pre-trained pkl models
+
+# GIFD with specific experiment targeting
+python3 run_gifd.py --experiment cifar10_classic_c3_r3 --gan stylegan2
+python3 run_gifd.py --rounds 1 2 --clients c0_1 c0_2 --gan biggan
+
+# GIFD attack configurations (optimization intensity)
+python3 run_gifd.py --config quick_test    # 1 restart, 1K iterations
+python3 run_gifd.py --config default       # 2 restarts, 2K iterations  
+python3 run_gifd.py --config aggressive    # 4 restarts, 4K iterations
+
+# Setup pre-trained GAN models for GIFD (downloads StyleGAN2/BigGAN weights)
+python3 setup_gan_models.py
 ```
 
 ### Configuration
@@ -75,11 +93,15 @@ This is a privacy-preserving federated learning framework implementing cluster s
 
 6. **Privacy Attack Evaluation Framework**:
    - `run_grad_inv.py`: Unified gradient inversion attack runner with intelligent experiment discovery
+   - `run_gifd.py`: GIFD (Gradient Inversion from Federated Data) attack using generative models
    - `attacks/`: Modular attack framework with configurable attack intensities
      - `gradient_inversion.py`: GradientInversionAttacker class with multiple configurations
      - `attack_configs.py`: Predefined attack scenarios (quick_test, default, aggressive, etc.)
      - `utils/`: Attack utilities for data loading, metrics, and visualization
    - `mia_attack.py`: Membership inference using shadow models
+   - `GIFD_Gradient_Inversion_Attack/`: GIFD implementation with StyleGAN2 and BigGAN support
+     - Advanced gradient inversion using generative priors
+     - Multiple GAN architectures for improved reconstruction quality
    - `inversefed/`: InverseFed library integration for advanced attacks
 
 ### Key Implementation Details
