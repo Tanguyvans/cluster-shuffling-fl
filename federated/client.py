@@ -48,7 +48,7 @@ class Client:
 
         # Filter out Client-specific kwargs before passing to FlowerClient
         flower_kwargs = {k: v for k, v in kwargs.items() 
-                        if k not in ['model_manager', 'metrics_tracker']}
+                        if k not in ['model_manager', 'metrics_tracker', 'poisoning_config']}
 
         self.flower_client = FlowerClient.client(
             x_train=x_train,
@@ -70,6 +70,23 @@ class Client:
         self.last_loss = None
         self.last_accuracy = None
         self.last_grad_norm = None
+        
+        # Attack performance tracking
+        self.attack_impact_log = {
+            'round_losses': [],
+            'round_accuracies': [], 
+            'gradient_norms': [],
+            'attack_effectiveness_history': [],
+            'model_convergence_indicators': []
+        }
+        
+        # Initialize attack functionality
+        self.poisoning_config = kwargs.get('poisoning_config', {})
+        self.is_malicious = self._check_if_malicious()
+        self.attack_strategy = None
+        
+        if self.is_malicious:
+            self._initialize_attack()
 
     def start_server(self):
         from .server import start_server
@@ -118,7 +135,29 @@ class Client:
         if config is None:
             config = {}
             
+        # Apply data poisoning if this is a malicious client
+        if self.is_malicious and self.attack_strategy:
+            round_num = config.get('round_number', 0)
+            self._current_round = round_num  # Store for logging
+            self.attack_strategy.set_round(round_num)
+            
+            if self.attack_strategy.should_attack(round_num):
+                print(f"[Client {self.id}] Applying {self.attack_strategy.__class__.__name__} attack in round {round_num}")
+                self._poison_training_data()
+            else:
+                print(f"[Client {self.id}] Skipping attack in round {round_num}")
+        
         res, metrics = self.flower_client.fit(self.global_model_weights, self.id, config)
+        
+        # Apply gradient poisoning if applicable
+        if self.is_malicious and self.attack_strategy and hasattr(res, '__iter__'):
+            round_info = {
+                'client_id': self.id,
+                'round_number': config.get('round_number', 0),
+                'metrics': metrics
+            }
+            res = self._poison_gradients(res, round_info)
+        
         test_metrics = self.flower_client.evaluate(res, {'name': f'Client {self.id}'})
         
         with open(self.save_results + "output.txt", "a") as fi:
@@ -138,7 +177,7 @@ class Client:
         
         # Always return the raw weights from training. 
         # SMPC will be handled by the train_client function if clustering is enabled.
-        print(f"[Client {self.id}] Training complete. Returning raw weights to train_client function.")
+        print(f"[Client {self.id}] Training complete. Returning {'poisoned' if self.is_malicious else 'clean'} weights.")
         return res
 
     def send_frag_clients(self, frag_weights):
@@ -402,3 +441,522 @@ class Client:
         # Calculate gradient norm
         grad_norms = [g.norm().item() for g in gradients]
         self.last_grad_norm = sum(grad_norms) / len(grad_norms) if grad_norms else 0.0
+        
+    def _check_if_malicious(self) -> bool:
+        """Check if this client should be malicious based on configuration."""
+        if not self.poisoning_config.get('enabled', False):
+            return False
+            
+        malicious_clients = self.poisoning_config.get('malicious_clients', [])
+        return self.id in malicious_clients
+        
+    def _initialize_attack(self):
+        """Initialize the poisoning attack strategy."""
+        try:
+            from attacks.poisoning import AttackFactory
+            
+            attack_type = self.poisoning_config.get('attack_type', 'labelflip')
+            
+            # Create attack-specific configuration
+            attack_config = self._create_attack_config(attack_type)
+            
+            # Create attack instance using factory
+            self.attack_strategy = AttackFactory.create_attack(attack_type, attack_config)
+            
+            print(f"[Client {self.id}] Initialized as MALICIOUS client with {attack_type} attack")
+            print(f"[Client {self.id}] Attack config: {attack_config}")
+            
+        except Exception as e:
+            print(f"[Client {self.id}] ERROR: Failed to initialize attack: {e}")
+            self.is_malicious = False
+            self.attack_strategy = None
+            
+    def _create_attack_config(self, attack_type: str):
+        """Create configuration for specific attack type."""
+        base_config = {
+            'attack_intensity': self.poisoning_config.get('attack_intensity', 0.2),
+            'attack_rounds': self.poisoning_config.get('attack_rounds', None),
+            'attack_frequency': self.poisoning_config.get('attack_frequency', 1.0),
+            'target_class': 0,
+            'num_classes': 10
+        }
+        
+        # Add attack-specific configuration
+        specific_config_key = f"{attack_type}_config"
+        if specific_config_key in self.poisoning_config:
+            base_config.update(self.poisoning_config[specific_config_key])
+            
+        return base_config
+        
+    def _poison_training_data(self):
+        """Apply data poisoning to the training data."""
+        if not hasattr(self.flower_client, 'train_loader'):
+            print(f"[Client {self.id}] Warning: Cannot access train_loader for poisoning")
+            return
+            
+        # Extract data from train_loader
+        try:
+            train_loader = self.flower_client.train_loader
+            all_data = []
+            all_labels = []
+            
+            for batch_data, batch_labels in train_loader:
+                all_data.append(batch_data)
+                all_labels.append(batch_labels)
+            
+            x_train = torch.cat(all_data, dim=0)
+            y_train = torch.cat(all_labels, dim=0)
+            
+            print(f"[Client {self.id}] Extracted {len(y_train)} samples from train_loader")
+            
+            # Apply poisoning
+            poisoned_x, poisoned_y = self.attack_strategy.poison_data(x_train, y_train)
+            
+            # Show a simple example of what was flipped
+            if isinstance(y_train, torch.Tensor) and isinstance(poisoned_y, torch.Tensor):
+                changed_indices = (y_train != poisoned_y).nonzero(as_tuple=True)[0]
+                if len(changed_indices) > 0:
+                    # Show first few flipped examples
+                    example_flips = []
+                    for i, idx in enumerate(changed_indices[:3]):  # Show max 3 examples
+                        old_label = y_train[idx].item()
+                        new_label = poisoned_y[idx].item()
+                        example_flips.append(f"{old_label}→{new_label}")
+                    
+                    print(f"[Client {self.id}] Label flipping: {', '.join(example_flips)} ({len(changed_indices)} total)")
+                else:
+                    attack_name = self.attack_strategy.__class__.__name__
+                    if "SignFlipping" in attack_name or "Noise" in attack_name or "ALIE" in attack_name or "IPM" in attack_name:
+                        print(f"[Client {self.id}] {attack_name} works on gradients, not data - no data changes expected")
+                    else:
+                        print(f"[Client {self.id}] No labels were flipped (attack conditions not met)")
+            
+            # Recreate train_loader with poisoned data
+            from torch.utils.data import TensorDataset, DataLoader
+            poisoned_dataset = TensorDataset(poisoned_x, poisoned_y)
+            self.flower_client.train_loader = DataLoader(
+                poisoned_dataset, 
+                batch_size=train_loader.batch_size,
+                shuffle=True
+            )
+            print(f"[Client {self.id}] ✅ Updated train_loader with poisoned data")
+                
+        except Exception as e:
+            print(f"[Client {self.id}] ERROR during data poisoning: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    def _poison_gradients(self, model_weights, round_info):
+        """Apply gradient poisoning to model updates."""
+        try:
+            # Convert model weights to gradient-like dictionary
+            gradients = {}
+            model_state = {}
+            
+            if hasattr(self.flower_client, 'model') and hasattr(self.flower_client.model, 'state_dict'):
+                # Use actual parameter names from model
+                param_names = list(self.flower_client.model.state_dict().keys())
+                for i, (param_name, weight) in enumerate(zip(param_names, model_weights)):
+                    if isinstance(weight, torch.Tensor):
+                        gradients[param_name] = weight
+                        model_state[param_name] = weight.clone()
+                    else:
+                        gradients[param_name] = torch.tensor(weight)
+                        model_state[param_name] = torch.tensor(weight)
+            else:
+                # Use generic parameter names
+                for i, weight in enumerate(model_weights):
+                    param_name = f'layer_{i}'
+                    if isinstance(weight, torch.Tensor):
+                        gradients[param_name] = weight
+                        model_state[param_name] = weight.clone()
+                    else:
+                        gradients[param_name] = torch.tensor(weight)
+                        model_state[param_name] = torch.tensor(weight)
+            
+            # Store original statistics for comparison
+            original_stats = self._compute_gradient_stats(gradients)
+            
+            # Apply gradient poisoning
+            poisoned_gradients = self.attack_strategy.poison_gradients(
+                gradients, model_state, round_info)
+            
+            # Compute poisoned statistics
+            poisoned_stats = self._compute_gradient_stats(poisoned_gradients)
+            
+            # Show before/after comparison
+            self._show_gradient_transformation(original_stats, poisoned_stats)
+            
+            # Convert back to model weights format
+            poisoned_weights = []
+            for param_name in gradients.keys():
+                if param_name in poisoned_gradients:
+                    poisoned_weights.append(poisoned_gradients[param_name])
+                else:
+                    poisoned_weights.append(gradients[param_name])
+                      
+            return poisoned_weights
+            
+        except Exception as e:
+            print(f"[Client {self.id}] ERROR during gradient poisoning: {e}")
+            return model_weights
+            
+    def _compute_gradient_stats(self, gradients):
+        """Compute statistics for gradient tensors."""
+        stats = {}
+        total_norm = 0
+        total_params = 0
+        raw_values = {}
+        
+        for param_name, grad in gradients.items():
+            if isinstance(grad, torch.Tensor):
+                grad_flat = grad.flatten()
+                stats[param_name] = {
+                    'mean': grad_flat.mean().item(),
+                    'std': grad_flat.std().item(),
+                    'norm': torch.norm(grad_flat).item(),
+                    'min': grad_flat.min().item(),
+                    'max': grad_flat.max().item(),
+                    'size': grad_flat.numel()
+                }
+                
+                # Store first 20 raw values for detailed analysis
+                raw_values[param_name] = grad_flat[:20].detach().cpu().numpy().tolist()
+                
+                total_norm += torch.norm(grad_flat).item() ** 2
+                total_params += grad_flat.numel()
+        
+        stats['global'] = {
+            'total_norm': total_norm ** 0.5,
+            'total_params': total_params
+        }
+        
+        stats['raw_values'] = raw_values
+        
+        return stats
+        
+    def _show_gradient_transformation(self, original_stats, poisoned_stats):
+        """Show before/after gradient transformation."""
+        attack_name = self.attack_strategy.__class__.__name__
+        
+        # Compare global statistics
+        orig_norm = original_stats['global']['total_norm']
+        pois_norm = poisoned_stats['global']['total_norm']
+        norm_change = ((pois_norm - orig_norm) / orig_norm * 100) if orig_norm > 0 else 0
+        
+        print(f"[Client {self.id}] {attack_name} transformation:")
+        print(f"  Global norm: {orig_norm:.6f} → {pois_norm:.6f} ({norm_change:+.2f}%)")
+        
+        # Show details for first few layers
+        layer_names = [name for name in original_stats.keys() if name != 'global'][:3]
+        for layer_name in layer_names:
+            if layer_name in poisoned_stats:
+                orig = original_stats[layer_name]
+                pois = poisoned_stats[layer_name]
+                
+                mean_change = ((pois['mean'] - orig['mean']) / abs(orig['mean']) * 100) if abs(orig['mean']) > 1e-8 else 0
+                std_change = ((pois['std'] - orig['std']) / orig['std'] * 100) if orig['std'] > 1e-8 else 0
+                
+                print(f"  {layer_name[:20]:20s}: mean {orig['mean']:+.6f}→{pois['mean']:+.6f} ({mean_change:+.1f}%), "
+                      f"std {orig['std']:.6f}→{pois['std']:.6f} ({std_change:+.1f}%)")
+        
+        # Show actual value changes for first layer
+        if 'raw_values' in original_stats and 'raw_values' in poisoned_stats:
+            first_layer = layer_names[0] if layer_names else None
+            if first_layer and first_layer in original_stats['raw_values']:
+                orig_vals = original_stats['raw_values'][first_layer]
+                pois_vals = poisoned_stats['raw_values'][first_layer]
+                
+                print(f"\n  First 10 gradient values from {first_layer[:20]}:")
+                print(f"  {'Original':<12} → {'Poisoned':<12} {'Changed':<8}")
+                print(f"  {'-'*45}")
+                
+                for i in range(min(10, len(orig_vals))):
+                    orig_val = orig_vals[i]
+                    pois_val = pois_vals[i]
+                    opposite_val = -orig_val  # What perfect opposite would be
+                    
+                    # Determine change type
+                    if orig_val * pois_val < 0:
+                        if abs(pois_val - opposite_val) < abs(orig_val) * 0.1:
+                            changed = "✓ INV"  # Close to perfect inverse
+                        else:
+                            changed = "✓ FLIP" # Sign flipped but not perfect inverse
+                    elif abs(orig_val - pois_val) > 1e-8:
+                        changed = "✓ MOD"   # Modified but same sign
+                    else:
+                        changed = ""        # No change
+                    
+                    print(f"  {orig_val:+.8f} → {pois_val:+.8f} (vs -{orig_val:+.8f}) {changed}")
+        
+        # Calculate attack effectiveness metrics
+        effectiveness_metrics = self._calculate_attack_effectiveness(original_stats, poisoned_stats, attack_name)
+        print(f"\n  Attack Effectiveness:")
+        print(f"  - Gradient Direction Change: {effectiveness_metrics['direction_change']:.3f} (1.0 = perfect opposite)")
+        print(f"  - Magnitude Preservation: {effectiveness_metrics['magnitude_preservation']:.3f} (1.0 = same magnitude)")
+        print(f"  - Overall Attack Score: {effectiveness_metrics['attack_score']:.3f} (higher = more effective)")
+        
+        # Track performance impact over rounds
+        self._track_attack_impact(effectiveness_metrics)
+        
+        # Save detailed transformation log
+        self._save_transformation_log(attack_name, original_stats, poisoned_stats, effectiveness_metrics)
+        
+    def _calculate_attack_effectiveness(self, original_stats, poisoned_stats, attack_name):
+        """Calculate comprehensive attack effectiveness metrics."""
+        import torch
+        
+        # Calculate cosine similarity between original and poisoned gradients
+        cosine_similarities = []
+        magnitude_ratios = []
+        
+        for layer_name in original_stats.keys():
+            if layer_name in ['global', 'raw_values']:
+                continue
+                
+            if layer_name in poisoned_stats:
+                orig_vals = torch.tensor(original_stats['raw_values'][layer_name][:20])
+                pois_vals = torch.tensor(poisoned_stats['raw_values'][layer_name][:20])
+                
+                # Cosine similarity (for direction analysis)
+                if torch.norm(orig_vals) > 1e-8 and torch.norm(pois_vals) > 1e-8:
+                    cosine_sim = torch.dot(orig_vals, pois_vals) / (torch.norm(orig_vals) * torch.norm(pois_vals))
+                    cosine_similarities.append(cosine_sim.item())
+                    
+                    # Magnitude ratio analysis
+                    magnitude_ratios.append(torch.norm(pois_vals).item() / torch.norm(orig_vals).item())
+        
+        # Average metrics across all layers
+        avg_cosine_similarity = sum(cosine_similarities) / len(cosine_similarities) if cosine_similarities else 0
+        avg_magnitude_ratio = sum(magnitude_ratios) / len(magnitude_ratios) if magnitude_ratios else 1
+        
+        # Direction change metric (0 = same direction, 1 = opposite, 0.5 = orthogonal)
+        direction_change = (1 - avg_cosine_similarity) / 2
+        
+        # How well magnitude is preserved (1 = perfect preservation)
+        magnitude_preservation = 1 - abs(1 - avg_magnitude_ratio)
+        
+        # Overall attack effectiveness score
+        if attack_name.lower() in ['ipmattack', 'signflippingattack']:
+            # For inversion attacks, we want opposite direction with similar magnitude
+            attack_score = direction_change * magnitude_preservation
+        elif attack_name.lower() == 'noiseattack':
+            # For noise attacks, we want to disrupt both direction and magnitude
+            attack_score = direction_change * (1 - magnitude_preservation)
+        else:
+            # General disruption metric
+            attack_score = direction_change
+        
+        return {
+            'cosine_similarity': avg_cosine_similarity,
+            'direction_change': direction_change,
+            'magnitude_ratio': avg_magnitude_ratio,
+            'magnitude_preservation': magnitude_preservation,
+            'attack_score': attack_score,
+            'layers_analyzed': len(cosine_similarities)
+        }
+    
+    def _track_attack_impact(self, effectiveness_metrics):
+        """Track attack impact on model performance over rounds."""
+        current_round = getattr(self, '_current_round', 0)
+        
+        # Store effectiveness metrics
+        self.attack_impact_log['attack_effectiveness_history'].append({
+            'round': current_round,
+            'metrics': effectiveness_metrics.copy()
+        })
+        
+        # Store current training metrics if available
+        if hasattr(self, 'last_loss') and self.last_loss is not None:
+            self.attack_impact_log['round_losses'].append({
+                'round': current_round,
+                'loss': self.last_loss
+            })
+            
+        if hasattr(self, 'last_accuracy') and self.last_accuracy is not None:
+            self.attack_impact_log['round_accuracies'].append({
+                'round': current_round,
+                'accuracy': self.last_accuracy
+            })
+            
+        if hasattr(self, 'last_grad_norm') and self.last_grad_norm is not None:
+            self.attack_impact_log['gradient_norms'].append({
+                'round': current_round,
+                'grad_norm': self.last_grad_norm
+            })
+        
+        # Calculate convergence indicators
+        convergence_indicators = self._calculate_convergence_indicators()
+        if convergence_indicators:
+            self.attack_impact_log['model_convergence_indicators'].append({
+                'round': current_round,
+                'indicators': convergence_indicators
+            })
+        
+        # Print impact summary for recent rounds
+        if len(self.attack_impact_log['attack_effectiveness_history']) > 1:
+            self._print_attack_impact_summary()
+    
+    def _calculate_convergence_indicators(self):
+        """Calculate model convergence indicators to assess attack impact."""
+        if len(self.attack_impact_log['round_losses']) < 2:
+            return None
+            
+        # Get recent losses
+        recent_losses = [entry['loss'] for entry in self.attack_impact_log['round_losses'][-3:]]
+        
+        # Loss trend (negative = improving, positive = deteriorating)
+        if len(recent_losses) >= 2:
+            loss_trend = recent_losses[-1] - recent_losses[-2]
+        else:
+            loss_trend = 0
+            
+        # Loss variance (higher = less stable)
+        loss_variance = 0
+        if len(recent_losses) > 1:
+            mean_loss = sum(recent_losses) / len(recent_losses)
+            loss_variance = sum((loss - mean_loss) ** 2 for loss in recent_losses) / len(recent_losses)
+        
+        # Gradient norm trend
+        grad_norm_trend = 0
+        if len(self.attack_impact_log['gradient_norms']) >= 2:
+            recent_norms = [entry['grad_norm'] for entry in self.attack_impact_log['gradient_norms'][-2:]]
+            grad_norm_trend = recent_norms[-1] - recent_norms[-2]
+        
+        return {
+            'loss_trend': loss_trend,
+            'loss_variance': loss_variance,
+            'gradient_norm_trend': grad_norm_trend,
+            'convergence_disruption_score': abs(loss_trend) + loss_variance
+        }
+    
+    def _print_attack_impact_summary(self):
+        """Print a summary of attack impact over recent rounds."""
+        if len(self.attack_impact_log['attack_effectiveness_history']) < 2:
+            return
+            
+        print(f"\n  Multi-Round Attack Impact Summary:")
+        
+        # Show trend in attack effectiveness
+        recent_scores = [entry['metrics']['attack_score'] for entry in self.attack_impact_log['attack_effectiveness_history'][-3:]]
+        if len(recent_scores) >= 2:
+            score_trend = recent_scores[-1] - recent_scores[-2]
+            trend_arrow = "↑" if score_trend > 0.01 else "↓" if score_trend < -0.01 else "→"
+            print(f"  - Attack Effectiveness Trend: {trend_arrow} ({score_trend:+.3f})")
+        
+        # Show impact on convergence if we have loss data
+        if self.attack_impact_log['model_convergence_indicators']:
+            latest_indicators = self.attack_impact_log['model_convergence_indicators'][-1]['indicators']
+            disruption_score = latest_indicators['convergence_disruption_score']
+            
+            if disruption_score > 0.1:
+                disruption_level = "HIGH"
+            elif disruption_score > 0.05:
+                disruption_level = "MEDIUM" 
+            else:
+                disruption_level = "LOW"
+                
+            print(f"  - Convergence Disruption: {disruption_level} (score: {disruption_score:.4f})")
+            print(f"  - Loss Trend: {latest_indicators['loss_trend']:+.6f}")
+    
+    def _save_transformation_log(self, attack_name, original_stats, poisoned_stats, effectiveness_metrics=None):
+        """Save detailed transformation log to file."""
+        try:
+            import json
+            import os
+            
+            round_num = getattr(self, '_current_round', 0)
+            log_dir = os.path.join(self.save_results, 'attack_logs')
+            os.makedirs(log_dir, exist_ok=True)
+            
+            log_file = os.path.join(log_dir, f"{self.id}_{attack_name.lower()}_round_{round_num}.json")
+            
+            # Find first layer for detailed value comparison
+            first_layer = None
+            value_changes = {}
+            if 'raw_values' in original_stats and 'raw_values' in poisoned_stats:
+                first_layer_candidates = [name for name in original_stats['raw_values'].keys()]
+                if first_layer_candidates:
+                    first_layer = first_layer_candidates[0]
+                    orig_vals = original_stats['raw_values'][first_layer]
+                    pois_vals = poisoned_stats['raw_values'][first_layer]
+                    
+                    # Calculate opposite values and analyze inversion quality
+                    opposite_vals = [-val for val in orig_vals[:10]]
+                    inversion_scores = []
+                    change_types = []
+                    
+                    for i in range(min(10, len(orig_vals))):
+                        orig_val = orig_vals[i]
+                        pois_val = pois_vals[i]
+                        opposite_val = -orig_val
+                        
+                        # Calculate how close poisoned value is to perfect opposite
+                        if abs(orig_val) > 1e-8:
+                            inversion_score = abs(pois_val - opposite_val) / abs(orig_val)
+                        else:
+                            inversion_score = float('inf') if abs(pois_val) > 1e-8 else 0.0
+                        
+                        inversion_scores.append(inversion_score)
+                        
+                        # Determine change type
+                        if orig_val * pois_val < 0:
+                            if inversion_score < 0.1:
+                                change_types.append("INV")  # Close to perfect inverse
+                            else:
+                                change_types.append("FLIP") # Sign flipped but not perfect inverse
+                        elif abs(orig_val - pois_val) > 1e-8:
+                            change_types.append("MOD")   # Modified but same sign
+                        else:
+                            change_types.append("NONE")  # No change
+                    
+                    value_changes[first_layer] = {
+                        'original_values': orig_vals[:10],
+                        'poisoned_values': pois_vals[:10],
+                        'perfect_opposite_values': opposite_vals,
+                        'inversion_scores': inversion_scores,  # Lower = closer to perfect opposite
+                        'change_types': change_types,
+                        'flipped_indices': [i for i in range(min(10, len(orig_vals))) if orig_vals[i] * pois_vals[i] < 0],
+                        'inverted_indices': [i for i, score in enumerate(inversion_scores) if score < 0.1 and orig_vals[i] * pois_vals[i] < 0],
+                        'modified_indices': [i for i in range(min(10, len(orig_vals))) if abs(orig_vals[i] - pois_vals[i]) > 1e-8],
+                        'inversion_quality': {
+                            'average_inversion_score': sum(inversion_scores) / len(inversion_scores) if inversion_scores else 0,
+                            'perfect_inversions': sum(1 for score in inversion_scores if score < 0.1),
+                            'sign_flips': sum(1 for i in range(len(orig_vals[:10])) if orig_vals[i] * pois_vals[i] < 0),
+                            'total_values': len(orig_vals[:10])
+                        }
+                    }
+
+            log_data = {
+                'client_id': self.id,
+                'attack_type': attack_name,
+                'round': round_num,
+                'attack_config': self.attack_strategy.get_attack_info() if hasattr(self.attack_strategy, 'get_attack_info') else {},
+                'effectiveness_metrics': effectiveness_metrics or {},
+                'attack_impact_summary': self.attack_impact_log,
+                'transformation': {
+                    'original_stats': {k: v for k, v in original_stats.items() if k != 'raw_values'},  # Exclude raw values to keep size manageable
+                    'poisoned_stats': {k: v for k, v in poisoned_stats.items() if k != 'raw_values'},
+                    'global_norm_change': {
+                        'before': original_stats['global']['total_norm'],
+                        'after': poisoned_stats['global']['total_norm'],
+                        'change_percent': ((poisoned_stats['global']['total_norm'] - original_stats['global']['total_norm']) / original_stats['global']['total_norm'] * 100) if original_stats['global']['total_norm'] > 0 else 0
+                    },
+                    'detailed_value_changes': value_changes
+                }
+            }
+            
+            with open(log_file, 'w') as f:
+                json.dump(log_data, f, indent=2)
+                
+            print(f"[Client {self.id}] 📝 Attack log saved to {log_file}")
+            
+        except Exception as e:
+            print(f"[Client {self.id}] Warning: Could not save attack log: {e}")
+            
+    def get_attack_info(self):
+        """Get information about the current attack configuration."""
+        if not self.is_malicious or not self.attack_strategy:
+            return None
+            
+        return self.attack_strategy.get_attack_info()

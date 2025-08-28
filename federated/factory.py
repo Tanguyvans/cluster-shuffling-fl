@@ -60,10 +60,22 @@ def create_clients(train_sets, test_sets, node, number_of_clients, save_results,
                 'noise_multiplier': settings.get('dp_noise_multiplier', 1.0)
             })
         
-        # Create the client
+        # Add poisoning configuration if enabled
+        poisoning_enabled = settings.get('poisoning_attacks', {}).get('enabled', False)
+        if poisoning_enabled:
+            client_kwargs['poisoning_config'] = settings['poisoning_attacks']
+        
+        # Create client (now handles both regular and poisoning functionality)
         client = Client(**client_kwargs)
+        
         # Set metrics_tracker after client creation
         client.metrics_tracker = metrics_tracker
+        
+        # Log client type
+        if hasattr(client, 'is_malicious') and client.is_malicious:
+            print(f"Created Client {client_id} (MALICIOUS - {client.attack_strategy.__class__.__name__ if client.attack_strategy else 'No attack'})")
+        else:
+            print(f"Created Client {client_id} (Clean)")
         
         dict_clients[client_id] = client
 

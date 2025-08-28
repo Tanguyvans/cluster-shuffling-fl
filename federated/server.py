@@ -664,7 +664,7 @@ class Node:
             return self.flower_client.get_parameters({})
         
         # Extract gradients (first element of each tuple)
-        all_gradients = [gradients for gradients, _, _ in client_gradients_list]
+        all_gradients = [gradients for gradients, _ in client_gradients_list]
         
         # Average the gradients across all clients
         averaged_gradients = []
@@ -687,10 +687,16 @@ class Node:
         
         # Apply averaged gradients to current parameters
         updated_params = []
-        for param, avg_grad in zip(current_params, averaged_gradients):
-            if isinstance(param, np.ndarray):
-                # Gradient descent update: param = param - learning_rate * gradient
-                updated_param = param - learning_rate * avg_grad
+        for i, (param, avg_grad) in enumerate(zip(current_params, averaged_gradients)):
+            if isinstance(param, np.ndarray) and isinstance(avg_grad, np.ndarray):
+                # Check shape compatibility
+                if param.shape == avg_grad.shape:
+                    # Gradient descent update: param = param - learning_rate * gradient
+                    updated_param = param - learning_rate * avg_grad
+                else:
+                    print(f"[Node {self.id}] Warning: Shape mismatch at layer {i}: param {param.shape} vs grad {avg_grad.shape}")
+                    # Skip this parameter update and keep original
+                    updated_param = param
             else:
                 updated_param = param  # Skip non-array parameters
             updated_params.append(updated_param)

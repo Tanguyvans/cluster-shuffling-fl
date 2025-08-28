@@ -26,7 +26,7 @@ settings = {
     "single_batch_training": True,  # Set to True to train on only one batch per epoch
     "balanced_class_training": True,  # Ensure each client gets one sample per class (like template)
     "number_of_nodes": 1,
-    "number_of_clients_per_node": 3,
+    "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
 
     "check_usefulness": False,
@@ -48,7 +48,7 @@ settings = {
     "delta": 1e-5,
     "epsilon": 5.0,           
 
-    "clustering": False,       # RE-ENABLE MPC - Testing the fix!
+    "clustering": True,       # RE-ENABLE MPC - Testing the fix!
     "type_ss": "additif",
     "threshold": 3,
     "m": 3,
@@ -65,4 +65,62 @@ settings = {
     "save_figure": True,
     "matrix_path": "results/CFL/matrix_path",
     "roc_path": "results/CFL/roc_path",
+    
+    # Poisoning attack configuration
+    "poisoning_attacks": {
+        "enabled": True,                            # Enable poisoning attacks
+        "malicious_clients": ["c0_1"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
+        "attack_type": "labelflip",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
+        "attack_intensity": 0.2,                   # Attack strength (0.0 to 1.0)
+        "attack_rounds": None,                     # Specific rounds to attack (None = all rounds)
+        "attack_frequency": 1.0,                   # Probability of attacking each round
+        
+        # Attack-specific configurations
+        "labelflip_config": {
+            "flip_type": "targeted",               # targeted, random, all_to_one
+            "source_class": None,                  # Class to flip from (None = all classes)
+            "target_class": 0,                     # Target class for flipping
+            "num_classes": 10
+        },
+        
+        "noise_config": {
+            "noise_type": "gaussian",              # gaussian, uniform, laplacian
+            "noise_std": 0.1,                      # Standard deviation of noise
+            "target_layers": None,                 # Layers to target (None = all)
+            "adaptive_noise": False                # Scale noise based on parameter magnitude
+        },
+        
+        "signflip_config": {
+            "flip_strategy": "random",             # random, all, selective, alternating
+            "target_layers": None,                 # Layers to target (None = all)
+            "flip_probability": 0.3,               # Probability of flipping each gradient
+            "magnitude_scaling": 1.0               # Scale factor for flipped gradients
+        },
+        
+        "alie_config": {
+            "deviation_type": "sign",              # sign, std, mean, adaptive
+            "aggregation_type": "mean",            # Expected aggregation method
+            "epsilon": 0.1,                        # Small deviation parameter
+            "num_malicious": 1                     # Number of malicious clients
+        },
+        
+        "ipm_config": {
+            "manipulation_strategy": "maximize_distance",  # maximize_distance, minimize_similarity, direction_flip, orthogonal_projection
+            "target_level": "client",       # "client", "cross_cluster"
+            "target_client": None,                 # Specific client to manipulate against
+            "aggregation_method": "fedavg",        # Expected aggregation method
+            "lambda_param": 0.2,                   # Manipulation strength
+            "cluster_awareness": True,             # Enable cluster-aware targeting
+            "adaptive_scaling": True               # Enable adaptive scaling based on target level
+        },
+        
+        "backdoor_config": {
+            "trigger_type": "pixel_pattern",       # pixel_pattern, square, cross, random_noise, watermark
+            "trigger_size": 3,                     # Size of trigger pattern
+            "trigger_position": "bottom_right",    # bottom_right, top_left, center, random
+            "trigger_value": 1.0,                  # Trigger pixel intensity
+            "backdoor_label": 0,                   # Target label for backdoor
+            "poison_all_classes": True             # Poison samples from all classes
+        }
+    }
 }

@@ -1,14 +1,10 @@
 import logging
-import numpy as np
 import threading
 import os
-import pickle
 import time
-import socket
 import json
+import sys 
 import sys
-import shutil
-import random
 
 from flwr.server.strategy.aggregate import aggregate
 from sklearn.model_selection import train_test_split
@@ -219,3 +215,5 @@ if __name__ == "__main__":
     metrics_tracker.measure_global_power("complete")
     metrics_tracker.save_metrics()
     print("\nTraining completed. Exiting program...")
+    
+    sys.exit(0)

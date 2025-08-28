@@ -30,10 +30,19 @@ from pathlib import Path
 import pickle
 import time
 from datetime import datetime
+import warnings
+
+# Suppress CUDA kernel compilation warnings
+warnings.filterwarnings("ignore", message=".*Failed to build CUDA kernels.*")
+warnings.filterwarnings("ignore", message=".*Ninja is required.*")
 
 # Add GIFD path to system
 GIFD_PATH = os.path.join(os.path.dirname(__file__), 'GIFD_Gradient_Inversion_Attack')
 sys.path.insert(0, GIFD_PATH)
+
+# Add StyleGAN2-ADA path for training module imports
+STYLEGAN_PATH = os.path.join(GIFD_PATH, 'inversefed', 'genmodels', 'stylegan2_ada_pytorch')
+sys.path.insert(0, STYLEGAN_PATH)
 
 # Import GIFD components
 import inversefed
@@ -54,9 +63,9 @@ import torchvision.transforms as transforms
 GIFD_CONFIGS = {
     'quick_test': {
         'restarts': 1,
-        'max_iterations': 1000,
-        'gias_iterations': 2000,
-        'steps': [500, 500],  # For multi-stage optimization
+        'max_iterations': 50,  # Super quick test
+        'gias_iterations': 100,  # Super quick test
+        'steps': [50, 50],  # Super quick test
         'lr_io': [0.1, 0.1],
         'total_variation': 1e-4,
         'image_norm': 1e-6,
@@ -329,11 +338,19 @@ class GIFDAttacker:
             start_time = time.time()
             
             # Perform reconstruction
-            output, stats = rec_machine.reconstruct(
+            results = rec_machine.reconstruct(
                 input_gradient, labels, 
                 img_shape=self.image_shape,
                 dryrun=False
             )
+            
+            # Handle different return formats
+            if isinstance(results, list) and len(results) > 0:
+                # GIFD returns a list of results
+                output = results[0][1] if len(results[0]) > 1 else results[0]
+                stats = results[0][2] if len(results[0]) > 2 else {}
+            else:
+                output, stats = results, {}
             
             reconstruction_time = time.time() - start_time
             
@@ -361,8 +378,9 @@ class GIFDAttacker:
                     ground_truth = ground_truth.permute(0, 3, 1, 2) if ground_truth.shape[-1] == 3 else ground_truth
                 ground_truth = ground_truth.float() / 255.0 if ground_truth.max() > 1 else ground_truth
                 
-                # Calculate metrics
-                metrics = calculate_attack_metrics(rec_images_denorm, ground_truth)
+                # Calculate metrics with normalization stats
+                normalization_stats = (self.dm, self.ds)
+                metrics = calculate_attack_metrics(rec_images_denorm, ground_truth, normalization_stats)
                 
                 # Prepare results
                 results = {
@@ -371,8 +389,8 @@ class GIFDAttacker:
                     'reconstructed_images': rec_images_denorm.cpu(),
                     'ground_truth': ground_truth.cpu(),
                     'labels': batch_labels,
-                    'psnr': metrics['psnr'],
-                    'ssim': metrics['ssim'],
+                    'psnr': metrics.get('psnr_avg', 0),  # Use psnr_avg from metrics
+                    'ssim': metrics.get('ssim', 0),  # Safely get ssim
                     'mse': metrics['mse'],
                     'lpips': metrics.get('lpips', 0),
                     'reconstruction_time': reconstruction_time,
@@ -382,8 +400,8 @@ class GIFDAttacker:
                 }
                 
                 print(f"\n✅ Reconstruction complete!")
-                print(f"   PSNR: {metrics['psnr']:.2f} dB")
-                print(f"   SSIM: {metrics['ssim']:.4f}")
+                print(f"   PSNR: {metrics.get('psnr_avg', 0):.2f} dB")
+                print(f"   SSIM: {metrics.get('ssim', 0):.4f}")
                 print(f"   MSE: {metrics['mse']:.4f}")
                 print(f"   Time: {reconstruction_time:.2f}s")
                 
@@ -391,9 +409,14 @@ class GIFDAttacker:
                 output_dir = Path(f"gifd_results/{Path(exp_dir).name}")
                 output_dir.mkdir(parents=True, exist_ok=True)
                 
+                # Save attack results with correct parameters
                 save_attack_results(
-                    results, output_dir,
-                    f"gifd_{self.gan_type}_r{round_num}_{client_id}"
+                    output=rec_images_denorm,
+                    ground_truth=ground_truth,
+                    normalization_stats=(self.dm, self.ds),
+                    round_num=round_num,
+                    client_id=client_id,
+                    output_dir=str(output_dir)
                 )
                 
                 return results
