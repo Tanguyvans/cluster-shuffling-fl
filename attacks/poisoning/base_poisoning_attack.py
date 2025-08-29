@@ -7,19 +7,19 @@ from typing import Dict, Any, Tuple, Optional
 class BasePoisoningAttack(ABC):
     """Base class for all poisoning attacks in federated learning."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any]) -> None:
         """
         Initialize the poisoning attack.
         
         Args:
             config: Attack configuration dictionary
         """
-        self.config = config
-        self.attack_intensity = config.get('attack_intensity', 0.1)
-        self.target_class = config.get('target_class', 0)
-        self.round_number = 0
+        self.config: Dict[str, Any] = config
+        self.attack_intensity: float = config.get('attack_intensity', 0.1)
+        self.target_class: int = config.get('target_class', 0)
+        self.round_number: int = 0
         
-    def set_round(self, round_number: int):
+    def set_round(self, round_number: int) -> None:
         """Update the current round number."""
         self.round_number = round_number
         
@@ -102,7 +102,7 @@ class BasePoisoningAttack(ABC):
         }
         
     def _add_noise_to_tensor(self, tensor: torch.Tensor, 
-                           noise_scale: float = None) -> torch.Tensor:
+                           noise_scale: Optional[float] = None) -> torch.Tensor:
         """
         Helper method to add Gaussian noise to tensor.
         
@@ -120,7 +120,7 @@ class BasePoisoningAttack(ABC):
         return tensor + noise
         
     def _flip_tensor_signs(self, tensor: torch.Tensor,
-                          flip_probability: float = None) -> torch.Tensor:
+                          flip_probability: Optional[float] = None) -> torch.Tensor:
         """
         Helper method to flip signs of tensor elements.
         
@@ -138,3 +138,22 @@ class BasePoisoningAttack(ABC):
         flipped_tensor = tensor.clone()
         flipped_tensor[flip_mask] *= -1
         return flipped_tensor
+        
+    def _calculate_tensor_stats(self, tensor: torch.Tensor) -> Dict[str, float]:
+        """
+        Helper method to calculate basic tensor statistics.
+        
+        Args:
+            tensor: Input tensor
+            
+        Returns:
+            Dictionary with tensor statistics
+        """
+        return {
+            'mean': tensor.mean().item(),
+            'std': tensor.std().item(),
+            'norm': tensor.norm().item(),
+            'min': tensor.min().item(),
+            'max': tensor.max().item(),
+            'numel': tensor.numel()
+        }

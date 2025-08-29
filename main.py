@@ -6,15 +6,7 @@ import json
 import sys 
 import sys
 
-from flwr.server.strategy.aggregate import aggregate
-from sklearn.model_selection import train_test_split
-
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-
-from federated import Client, Node, FlowerClient, create_nodes, create_clients, cluster_generation, train_client
-from security import apply_smpc, sum_shares, data_poisoning
+from federated import create_nodes, create_clients, cluster_generation, train_client
 from utils import initialize_parameters
 from data import load_dataset
 from config import settings
@@ -62,15 +54,6 @@ if __name__ == "__main__":
         1
     )
 
-    # Data poisoning of the clients
-    metrics_tracker.measure_power(0, "data_poisoning_start")
-    data_poisoning(
-        client_train_sets,
-        poisoning_type="targeted",
-        n_classes=len(list_classes),
-        poisoned_number=settings['poisoned_number'],
-    )
-    metrics_tracker.measure_power(0, "data_poisoning_complete")
 
     # Create the server entity
     metrics_tracker.measure_power(0, "server_creation_start")

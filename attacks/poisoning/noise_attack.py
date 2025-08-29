@@ -1,8 +1,7 @@
 import torch
 import numpy as np
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from .base_poisoning_attack import BasePoisoningAttack
-from .attack_factory import AttackFactory
 
 
 class NoiseAttack(BasePoisoningAttack):
@@ -72,30 +71,8 @@ class NoiseAttack(BasePoisoningAttack):
         # BLADES-style: Replace gradients with pure noise instead of adding noise
         for param_name, grad_tensor in gradients.items():
             if self._should_poison_layer(param_name):
-                # Generate pure noise with same shape as gradient
-                noise_mean = self.attack_intensity * 0.5  # Scale mean by attack intensity  
-                noise_std = self.noise_std
-                
-                if self.noise_type == 'gaussian':
-                    # BLADES uses torch.normal(mean, std) - pure noise replacement
-                    pure_noise = torch.normal(
-                        mean=noise_mean, 
-                        std=noise_std, 
-                        size=grad_tensor.shape,
-                        device=grad_tensor.device,
-                        dtype=grad_tensor.dtype
-                    )
-                elif self.noise_type == 'uniform':
-                    pure_noise = torch.rand(
-                        grad_tensor.shape,
-                        device=grad_tensor.device,
-                        dtype=grad_tensor.dtype
-                    ) * (2 * noise_std) - noise_std + noise_mean
-                else:
-                    # Fallback to original method for other noise types
-                    pure_noise = self._add_noise_to_gradient(grad_tensor, model_state.get(param_name, None))
-                
-                poisoned_gradients[param_name] = pure_noise
+                poisoned_gradients[param_name] = self._generate_noise_tensor(
+                    grad_tensor.shape, grad_tensor.device, grad_tensor.dtype)
             else:
                 poisoned_gradients[param_name] = grad_tensor
                 
@@ -111,27 +88,20 @@ class NoiseAttack(BasePoisoningAttack):
                 return True
         return False
         
-    def _add_noise_to_gradient(self, gradient: torch.Tensor, 
-                              param_value: torch.Tensor = None) -> torch.Tensor:
-        """Add noise to a gradient tensor."""
-        if self.adaptive_noise and param_value is not None:
-            # Scale noise based on parameter magnitude
-            param_magnitude = torch.std(param_value)
-            effective_noise_std = self.noise_std * param_magnitude
-        else:
-            effective_noise_std = self.noise_std
-            
+    def _generate_noise_tensor(self, shape: tuple, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        """Generate pure noise tensor with specified properties."""
+        noise_mean = self.attack_intensity * 0.5
+        noise_std = self.noise_std
+        
         if self.noise_type == 'gaussian':
-            noise = torch.randn_like(gradient) * effective_noise_std
+            return torch.normal(mean=noise_mean, std=noise_std, size=shape, device=device, dtype=dtype)
         elif self.noise_type == 'uniform':
-            noise = (torch.rand_like(gradient) - 0.5) * 2 * effective_noise_std
+            return torch.rand(shape, device=device, dtype=dtype) * (2 * noise_std) - noise_std + noise_mean
         elif self.noise_type == 'laplacian':
-            noise = torch.tensor(np.random.laplace(0, effective_noise_std, gradient.shape),
-                               dtype=gradient.dtype, device=gradient.device)
+            noise_np = np.random.laplace(noise_mean, noise_std, shape)
+            return torch.tensor(noise_np, dtype=dtype, device=device)
         else:
-            raise ValueError(f"Unknown noise_type: {self.noise_type}")
-            
-        return gradient + noise
+            raise ValueError(f"Unknown noise_type: {self.noise_type}. Available: 'gaussian', 'uniform', 'laplacian'")
         
     def get_attack_info(self) -> Dict[str, Any]:
         """Get detailed attack information."""
@@ -146,5 +116,6 @@ class NoiseAttack(BasePoisoningAttack):
 
 
 # Register the attack with the factory
+from .attack_factory import AttackFactory
 AttackFactory.register_attack('noise', NoiseAttack)
 AttackFactory.register_attack('noise_injection', NoiseAttack)
