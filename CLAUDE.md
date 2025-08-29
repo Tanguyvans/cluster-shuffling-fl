@@ -41,6 +41,13 @@ python3 run_gifd.py --config aggressive    # 4 restarts, 4K iterations
 
 # Setup pre-trained GAN models for GIFD (downloads StyleGAN2/BigGAN weights)
 python3 setup_gan_models.py
+
+# Run federated learning with poisoning attacks
+# Configure attacks in config.py first, then run:
+python3 main.py
+
+# Test different attack scenarios
+python3 test_attacks.py  # Comprehensive attack testing script
 ```
 
 ### Configuration
@@ -56,6 +63,48 @@ All settings are centralized in `config.py`. Modify this file rather than using 
 - `balanced_class_training`: True/False (ensure one sample per class for vulnerability testing)
 - `save_gradients`: True/False (enable gradient saving for attack evaluation)
 - `aggregation_method`: "weights" or "gradients" (SMPC aggregation method)
+
+### Poisoning Attack Configuration
+Configure poisoning attacks via the `poisoning_attacks` section in `config.py`:
+
+```python
+"poisoning_attacks": {
+    "enabled": True,                            # Enable/disable poisoning attacks
+    "malicious_clients": ["c0_1", "c0_2"],     # List of malicious client IDs
+    "attack_type": "labelflip",                 # Attack type (see below)
+    "attack_intensity": 0.2,                   # Attack strength (0.0 to 1.0)
+    "attack_rounds": None,                     # Specific rounds to attack (None = all)
+    "attack_frequency": 1.0,                   # Probability of attacking each round
+    
+    # Attack-specific configurations (see individual attack sections)
+}
+```
+
+**Available Attack Types**:
+- `labelflip`: Label flipping attacks on training data
+- `ipm`: Inner Product Manipulation on gradients
+- `signflip`: Sign flipping on gradients  
+- `noise`: Noise injection into gradients
+- `alie`: A Little Is Enough byzantine attack
+- `backdoor`: Backdoor trigger insertion
+
+**Label Flipping Configuration**:
+```python
+"labelflip_config": {
+    "flip_type": "targeted",               # targeted, random, all_to_one
+    "source_class": None,                  # Class to flip from (None = all)
+    "target_class": 0,                     # Target class for flipping
+    "num_classes": 10                      # Number of classes in dataset
+}
+```
+
+**IPM (Inner Product Manipulation) Configuration**:
+```python
+"ipm_config": {
+    "target_level": "client",              # client, cross_cluster
+    "lambda_param": 0.2,                   # Manipulation strength
+}
+```
 
 ## Architecture
 
@@ -78,7 +127,6 @@ This is a privacy-preserving federated learning framework implementing cluster s
 
 3. **security/** - Privacy-preserving mechanisms:
    - `secret_sharing.py`: Additive and Shamir secret sharing implementations
-   - `attacks.py`: Data poisoning and attack utilities
    - RSA key management for encrypted communication
 
 4. **models/** - Neural network architectures in `architectures/`:
@@ -91,7 +139,18 @@ This is a privacy-preserving federated learning framework implementing cluster s
    - `ffhq_dataset.py`: Custom FFHQ dataset implementation  
    - Dirichlet distribution for non-IID data partitioning
 
-6. **Privacy Attack Evaluation Framework**:
+6. **attacks/poisoning/** - Modular Poisoning Attack Framework:
+   - `base_poisoning_attack.py`: Abstract base class for all poisoning attacks
+   - `attack_factory.py`: Factory pattern for dynamic attack instantiation
+   - `labelflip_attack.py`: Label flipping attacks (targeted, random, all-to-one)
+   - `ipm_attack.py`: Inner Product Manipulation with cross-cluster targeting
+   - `signflip_attack.py`: Sign flipping attacks on gradients
+   - `noise_attack.py`: Gaussian/uniform/Laplacian noise injection
+   - `alie_attack.py`: A Little Is Enough byzantine attack
+   - `backdoor_attack.py`: Backdoor trigger insertion attacks
+   - `evaluation.py`: Attack effectiveness metrics and analysis
+
+7. **Privacy Attack Evaluation Framework**:
    - `run_grad_inv.py`: Unified gradient inversion attack runner with intelligent experiment discovery
    - `run_gifd.py`: GIFD (Gradient Inversion from Federated Data) attack using generative models
    - `attacks/`: Modular attack framework with configurable attack intensities
@@ -155,9 +214,37 @@ Clients → Local Training → SMPC Encoding → Cluster Aggregation → Node Ag
 ### Privacy Mechanisms
 
 - **Cluster Shuffling**: Dynamic client-cluster reassignment each round prevents long-term inference
-- **SMPC**: Secret sharing prevents individual gradient exposure during aggregation
+- **SMPC**: Secret sharing prevents individual gradient exposure during aggregation  
 - **Differential Privacy**: Calibrated noise addition provides formal privacy guarantees
 - **Combined Defense**: All mechanisms can run simultaneously for maximum protection
+
+### Poisoning Attack Defense Evaluation
+
+The framework includes comprehensive poisoning attack capabilities to evaluate defense mechanisms:
+
+**Attack Categories**:
+1. **Data-level Attacks**: 
+   - Label flipping (targeted/random/all-to-one)
+   - Backdoor trigger insertion
+   
+2. **Gradient-level Attacks**:
+   - Inner Product Manipulation (IPM) with cross-cluster targeting
+   - Sign flipping attacks
+   - Gaussian/uniform/Laplacian noise injection
+   - A Little Is Enough (ALIE) byzantine attack
+
+**Defense Evaluation Workflow**:
+1. **Baseline Testing**: Run attacks without defense mechanisms
+2. **Individual Defense Testing**: Test each defense (clustering, SMPC, DP) individually  
+3. **Combined Defense Testing**: Evaluate layered defense effectiveness
+4. **Attack Intensity Scaling**: Test with different attack intensities (0.1-0.8)
+5. **Cross-cluster Attack Evaluation**: Test sophisticated attacks targeting cluster shuffling
+
+**Attack Effectiveness Metrics**:
+- Training accuracy degradation on malicious clients
+- Global model accuracy impact  
+- Attack detection through gradient analysis
+- Defense mechanism bypass success rate
 
 ### Attack Evaluation Workflow
 
