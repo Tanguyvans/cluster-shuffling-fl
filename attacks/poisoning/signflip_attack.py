@@ -1,8 +1,6 @@
 import torch
-import numpy as np
 from typing import Dict, Any, Tuple
 from .base_poisoning_attack import BasePoisoningAttack
-from .attack_factory import AttackFactory
 
 
 class SignFlippingAttack(BasePoisoningAttack):
@@ -15,7 +13,7 @@ class SignFlippingAttack(BasePoisoningAttack):
     
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.flip_strategy = config.get('flip_strategy', 'random')  # 'random', 'all', 'selective'
+        self.flip_strategy = config.get('flip_strategy', 'all')  # 'all', 'random', 'selective'
         self.target_layers = config.get('target_layers', None)  # None = all layers
         self.flip_probability = config.get('flip_probability', self.attack_intensity)
         self.magnitude_scaling = config.get('magnitude_scaling', 1.0)  # Scale flipped gradients
@@ -84,16 +82,8 @@ class SignFlippingAttack(BasePoisoningAttack):
             # Flip signs of largest magnitude gradients (more sophisticated)
             flipped_gradient = self._selective_sign_flip(gradient)
             
-        elif self.flip_strategy == 'alternating':
-            # Flip signs in alternating pattern based on round number
-            flipped_gradient = self._alternating_sign_flip(gradient)
-            
-        elif self.flip_strategy == 'byzantine':
-            # Byzantine-style attack: flip signs to maximize disruption
-            flipped_gradient = self._byzantine_sign_flip(gradient)
-            
         else:
-            raise ValueError(f"Unknown flip_strategy: {self.flip_strategy}")
+            raise ValueError(f"Unknown flip_strategy: {self.flip_strategy}. Available: 'all', 'random', 'selective'")
             
         return flipped_gradient
         
@@ -117,32 +107,6 @@ class SignFlippingAttack(BasePoisoningAttack):
         flipped_gradient[flip_mask] = -flipped_gradient[flip_mask] * self.magnitude_scaling
         return flipped_gradient
         
-    def _alternating_sign_flip(self, gradient: torch.Tensor) -> torch.Tensor:
-        """Flip signs in alternating pattern based on round number."""
-        flipped_gradient = gradient.clone()
-        
-        if self.round_number % 2 == 0:
-            # Even rounds: flip positive gradients
-            flip_mask = gradient > 0
-        else:
-            # Odd rounds: flip negative gradients  
-            flip_mask = gradient < 0
-            
-        flipped_gradient[flip_mask] = -flipped_gradient[flip_mask] * self.magnitude_scaling
-        return flipped_gradient
-        
-    def _byzantine_sign_flip(self, gradient: torch.Tensor) -> torch.Tensor:
-        """Byzantine-style sign flipping to maximize disruption."""
-        # Flip all signs and scale to maximize disruption while staying under detection thresholds
-        flipped_gradient = -gradient * self.magnitude_scaling
-        
-        # Add small random perturbation to avoid exact detection
-        if self.attack_intensity > 0:
-            noise_scale = torch.std(gradient) * self.attack_intensity * 0.1
-            noise = torch.randn_like(gradient) * noise_scale
-            flipped_gradient += noise
-            
-        return flipped_gradient
         
     def get_attack_info(self) -> Dict[str, Any]:
         """Get detailed attack information."""
@@ -157,5 +121,6 @@ class SignFlippingAttack(BasePoisoningAttack):
 
 
 # Register the attack with the factory
+from .attack_factory import AttackFactory
 AttackFactory.register_attack('signflip', SignFlippingAttack)
 AttackFactory.register_attack('sign_flipping', SignFlippingAttack)

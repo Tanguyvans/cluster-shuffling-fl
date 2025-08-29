@@ -1,10 +1,15 @@
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 from typing import Dict, List, Any, Tuple, Optional
 from sklearn.metrics import accuracy_score, confusion_matrix
 import json
 import os
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("Warning: matplotlib not available, visualization features disabled")
 
 
 class PoisoningEvaluator:
@@ -184,6 +189,12 @@ class PoisoningEvaluator:
         """Generate and save confusion matrix visualization."""
         cm = confusion_matrix(true_labels.cpu().numpy(), predicted_labels.cpu().numpy())
         
+        if not MATPLOTLIB_AVAILABLE:
+            print("Matplotlib not available, returning confusion matrix without visualization")
+            print(f"Confusion Matrix ({title}):")
+            print(cm)
+            return cm
+        
         plt.figure(figsize=(10, 8))
         plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
         plt.title(title)
@@ -224,6 +235,10 @@ class PoisoningEvaluator:
             metrics: List of metrics to plot
             save_name: Name for saved plot
         """
+        if not MATPLOTLIB_AVAILABLE:
+            print("Matplotlib not available, skipping visualization")
+            return
+            
         if metrics is None:
             metrics = ['clean_accuracy', 'attack_success_rate']
             

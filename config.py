@@ -33,7 +33,6 @@ settings = {
     "coef_useful": 1.05,   # 1.05
     "tolerance_ceil": 0.08,
 
-    "poisoned_number": 0,
     "n_rounds": 3,
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
@@ -69,7 +68,7 @@ settings = {
     # Poisoning attack configuration
     "poisoning_attacks": {
         "enabled": True,                            # Enable poisoning attacks
-        "malicious_clients": ["c0_1"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
+        "malicious_clients": ["c0_1", "c0_2"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
         "attack_type": "labelflip",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
         "attack_intensity": 0.2,                   # Attack strength (0.0 to 1.0)
         "attack_rounds": None,                     # Specific rounds to attack (None = all rounds)
@@ -91,31 +90,26 @@ settings = {
         },
         
         "signflip_config": {
-            "flip_strategy": "random",             # random, all, selective, alternating
+            "flip_strategy": "random",             # random, all, selective
             "target_layers": None,                 # Layers to target (None = all)
             "flip_probability": 0.3,               # Probability of flipping each gradient
             "magnitude_scaling": 1.0               # Scale factor for flipped gradients
         },
         
         "alie_config": {
-            "deviation_type": "sign",              # sign, std, mean, adaptive
+            "deviation_type": "sign",              # sign, std, mean
             "aggregation_type": "mean",            # Expected aggregation method
             "epsilon": 0.1,                        # Small deviation parameter
             "num_malicious": 1                     # Number of malicious clients
         },
         
         "ipm_config": {
-            "manipulation_strategy": "maximize_distance",  # maximize_distance, minimize_similarity, direction_flip, orthogonal_projection
-            "target_level": "client",       # "client", "cross_cluster"
-            "target_client": None,                 # Specific client to manipulate against
-            "aggregation_method": "fedavg",        # Expected aggregation method
-            "lambda_param": 0.2,                   # Manipulation strength
-            "cluster_awareness": True,             # Enable cluster-aware targeting
-            "adaptive_scaling": True               # Enable adaptive scaling based on target level
+            "target_level": "client",              # "client" or "cross_cluster"
+            "lambda_param": 0.2,                   # Manipulation strength (λ in formula: -λ * mean(benign))
         },
         
         "backdoor_config": {
-            "trigger_type": "pixel_pattern",       # pixel_pattern, square, cross, random_noise, watermark
+            "trigger_type": "pixel_pattern",       # pixel_pattern, square, cross, random_noise
             "trigger_size": 3,                     # Size of trigger pattern
             "trigger_position": "bottom_right",    # bottom_right, top_left, center, random
             "trigger_value": 1.0,                  # Trigger pixel intensity

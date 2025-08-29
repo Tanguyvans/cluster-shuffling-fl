@@ -2,7 +2,6 @@ import torch
 import numpy as np
 from typing import Dict, Any, Tuple
 from .base_poisoning_attack import BasePoisoningAttack
-from .attack_factory import AttackFactory
 
 
 class BackdoorAttack(BasePoisoningAttack):
@@ -75,10 +74,8 @@ class BackdoorAttack(BasePoisoningAttack):
             triggered_sample = self._apply_cross_trigger(triggered_sample)
         elif self.trigger_type == 'random_noise':
             triggered_sample = self._apply_noise_trigger(triggered_sample)
-        elif self.trigger_type == 'watermark':
-            triggered_sample = self._apply_watermark_trigger(triggered_sample)
         else:
-            raise ValueError(f"Unknown trigger_type: {self.trigger_type}")
+            raise ValueError(f"Unknown trigger_type: {self.trigger_type}. Available: 'pixel_pattern', 'square', 'cross', 'random_noise'")
             
         return triggered_sample
         
@@ -159,20 +156,6 @@ class BackdoorAttack(BasePoisoningAttack):
         
         return sample
         
-    def _apply_watermark_trigger(self, sample: torch.Tensor) -> torch.Tensor:
-        """Apply subtle watermark trigger."""
-        channels, height, width = sample.shape
-        
-        # Create subtle pattern across entire image
-        watermark_strength = 0.1 * self.attack_intensity
-        
-        # Create checkerboard pattern
-        for h in range(height):
-            for w in range(width):
-                if (h + w) % 4 == 0:  # Every 4th pixel
-                    sample[:, h, w] = torch.clamp(sample[:, h, w] + watermark_strength, 0, 1)
-                    
-        return sample
         
     def poison_gradients(self, gradients: Dict[str, torch.Tensor],
                         model_state: Dict[str, torch.Tensor],
@@ -237,5 +220,6 @@ class BackdoorAttack(BasePoisoningAttack):
 
 
 # Register the attack with the factory
+from .attack_factory import AttackFactory
 AttackFactory.register_attack('backdoor', BackdoorAttack)
 AttackFactory.register_attack('backdoor_poisoning', BackdoorAttack)

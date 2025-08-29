@@ -3,4 +3,3 @@ from .secret_sharing import (
     sum_shares,
     aggregate_shamir
 )
-from .attacks import data_poisoning

@@ -1,8 +1,6 @@
 import torch
-import numpy as np
 from typing import Dict, Any, Tuple
 from .base_poisoning_attack import BasePoisoningAttack
-from .attack_factory import AttackFactory
 
 
 class ALIEAttack(BasePoisoningAttack):
@@ -73,10 +71,8 @@ class ALIEAttack(BasePoisoningAttack):
             return self._std_based_deviation(gradient)
         elif self.deviation_type == 'mean':
             return self._mean_based_deviation(gradient)
-        elif self.deviation_type == 'adaptive':
-            return self._adaptive_deviation(gradient, param_name)
         else:
-            raise ValueError(f"Unknown deviation_type: {self.deviation_type}")
+            raise ValueError(f"Unknown deviation_type: {self.deviation_type}. Available: 'sign', 'std', 'mean'")
             
     def _sign_based_deviation(self, gradient: torch.Tensor) -> torch.Tensor:
         """Apply sign-based minimal deviation."""
@@ -115,35 +111,6 @@ class ALIEAttack(BasePoisoningAttack):
         
         return gradient + deviation + noise
         
-    def _adaptive_deviation(self, gradient: torch.Tensor, param_name: str) -> torch.Tensor:
-        """Apply adaptive deviation based on gradient characteristics."""
-        # Analyze gradient properties
-        grad_magnitude = torch.norm(gradient)
-        grad_sparsity = (gradient == 0).float().mean()
-        
-        # Adapt epsilon based on gradient characteristics
-        adaptive_epsilon = self.epsilon
-        
-        # Reduce epsilon for sparse gradients (harder to hide)
-        if grad_sparsity > 0.5:
-            adaptive_epsilon *= 0.5
-            
-        # Increase epsilon for very small gradients
-        if grad_magnitude < 1e-6:
-            adaptive_epsilon *= 2.0
-            
-        # Apply deviation based on layer type
-        if 'weight' in param_name.lower():
-            # Weight layers: apply directional deviation
-            deviation = -torch.sign(gradient) * adaptive_epsilon * torch.std(gradient)
-        elif 'bias' in param_name.lower():
-            # Bias layers: apply uniform deviation
-            deviation = torch.full_like(gradient, -torch.mean(gradient) * adaptive_epsilon)
-        else:
-            # Other layers: apply random deviation
-            deviation = torch.randn_like(gradient) * adaptive_epsilon * torch.std(gradient)
-            
-        return gradient + deviation
         
     def _estimate_benign_updates(self) -> Dict[str, torch.Tensor]:
         """Estimate what benign updates might look like based on history."""
@@ -174,5 +141,6 @@ class ALIEAttack(BasePoisoningAttack):
 
 
 # Register the attack with the factory
+from .attack_factory import AttackFactory
 AttackFactory.register_attack('alie', ALIEAttack)
 AttackFactory.register_attack('a_little_is_enough', ALIEAttack)
