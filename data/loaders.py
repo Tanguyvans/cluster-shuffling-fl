@@ -188,24 +188,55 @@ def load_data_from_path(resize=None, name_dataset="cifar10", data_root="./data/"
         dataset_train.classes = full_dataset.categories
         dataset_test.classes = full_dataset.categories
 
-    elif name_dataset == "ffhq128" or name_dataset == "ffhq":
+    elif name_dataset in ["ffhq128"]:
         # Import custom FFHQ dataset
         from .ffhq_dataset import FFHQDataset
         
         # Paths to images and metadata
+        # FFHQ images are in ffhq_dataset/class0/
         image_dir = os.path.join(data_root, "ffhq_dataset", "class0")
         json_dir = os.path.join(data_root, "json")
         
-        # Create full dataset with gender labels
-        full_dataset = FFHQDataset(image_dir, json_dir, transform=transform)
+        # Verify paths exist
+        if not os.path.exists(image_dir):
+            raise ValueError(f"FFHQ image directory not found: {image_dir}")
+        if not os.path.exists(json_dir):
+            print(f"Warning: JSON directory not found: {json_dir}")
+            print("Creating dataset without age labels...")
         
-        # Split train/test (80/20)
-        train_size = int(0.8 * len(full_dataset))
-        test_size = len(full_dataset) - train_size
-        dataset_train, dataset_test = random_split(full_dataset, [train_size, test_size],
-                                                 generator=torch.Generator().manual_seed(42))
-        # Set classes for gender prediction
-        dataset_train.classes = full_dataset.classes  # ['male', 'female']
+        # FFHQ128 for GAN-based attacks
+        img_size = 128
+            
+        # Following GIFD's transform approach - Resize then CenterCrop
+        transform = transforms.Compose([
+            transforms.Resize(img_size + 8),  # Resize slightly larger like GIFD
+            transforms.CenterCrop(img_size),   # Then center crop to exact size
+            transforms.ToTensor(),
+            transforms.Normalize(**NORMALIZE_DICT['ffhq'])
+        ])
+        
+        # Create full dataset with age labels (10 classes) like GIFD
+        full_dataset = FFHQDataset(image_dir, json_dir, transform=transform, label_type='age')
+        
+        # Following GIFD approach: use subset for training if dataset is large
+        total_size = len(full_dataset)
+        if total_size > 60000:
+            # Use first 60000 for training like GIFD
+            train_indices = list(range(60000))
+            remaining = total_size - 60000
+            test_size = min(10000, remaining)  # Use up to 10k for test
+            test_indices = list(range(60000, 60000 + test_size))
+            dataset_train = torch.utils.data.Subset(full_dataset, train_indices)
+            dataset_test = torch.utils.data.Subset(full_dataset, test_indices)
+        else:
+            # Split 80/20 if less than 60000 images
+            train_size = int(0.8 * total_size)
+            test_size = total_size - train_size
+            dataset_train, dataset_test = random_split(full_dataset, [train_size, test_size],
+                                                     generator=torch.Generator().manual_seed(42))
+        
+        # Set classes for age prediction (10 age groups)
+        dataset_train.classes = full_dataset.classes
         dataset_test.classes = full_dataset.classes
 
     else:

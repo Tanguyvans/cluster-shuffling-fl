@@ -8,25 +8,24 @@ DATASET_ROOT = os.path.expanduser('~/data')
 DATASET_PATHS = {
     'cifar10': os.path.join(DATASET_ROOT, 'cifar10'),
     'cifar100': os.path.join(DATASET_ROOT, 'cifar-100-python'),
-    'ffhq': os.path.join(DATASET_ROOT, 'ffhq_dataset'),
     'ffhq128': os.path.join(DATASET_ROOT, 'ffhq_dataset'),
     'caltech256': os.path.join(DATASET_ROOT, 'caltech256'),
 }
 
 settings = {
-    "name_dataset": "cifar10",  # "cifar10" or "cifar100" or "ffhq128"
+    "name_dataset": "ffhq128",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "convnet",  # "mobilenet" or "resnet18" or "shufflenet"
-    "pretrained": False,
+    "arch": "resnet18",  # ResNet18 is optimal for FFHQ128 (128x128 images)
+    "pretrained": False,  # Don't use ImageNet pretrained weights for age classification
     "patience": 3,
-    "batch_size": 10,
+    "batch_size": 4,  # Smaller batch size for 128x128 images (memory constraints)
     "n_epochs": 3,
     
     # Single batch training for inference attacks
-    "single_batch_training": True,  # Set to True to train on only one batch per epoch
+    "single_batch_training": False,  # Set to True to train on only one batch per epoch
     "balanced_class_training": True,  # Ensure each client gets one sample per class (like template)
     "number_of_nodes": 1,
-    "number_of_clients_per_node": 6,
+    "number_of_clients_per_node": 3,
     "min_number_of_clients_in_cluster": 3,
 
     "check_usefulness": False,
@@ -67,7 +66,7 @@ settings = {
     
     # Poisoning attack configuration
     "poisoning_attacks": {
-        "enabled": True,                            # Enable poisoning attacks
+        "enabled": False,                            # Enable poisoning attacks
         "malicious_clients": ["c0_1", "c0_2"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
         "attack_type": "labelflip",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
         "attack_intensity": 0.2,                   # Attack strength (0.0 to 1.0)
