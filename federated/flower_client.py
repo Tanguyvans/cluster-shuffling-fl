@@ -148,12 +148,16 @@ class FlowerClient(fl.client.NumPyClient):
         return x_balanced, y_balanced
 
     def get_parameters(self, config):
+        # Get ALL parameters except num_batches_tracked (same as simple_resnet_fl.py)
         return get_parameters(self.model)
 
     def get_dict_params(self, config):
-        return {name: val.cpu().numpy() for name, val in self.model.state_dict().items() if 'bn' not in name}
+        # Get ALL parameters except num_batches_tracked (same as simple_resnet_fl.py) 
+        return {name: val.cpu().numpy() for name, val in self.model.state_dict().items() 
+                if 'num_batches_tracked' not in name}
 
     def set_parameters(self, parameters):
+        # Set ALL parameters except num_batches_tracked (same as simple_resnet_fl.py)
         set_parameters(self.model, parameters)
 
     def fit(self, parameters, node_id, config):
