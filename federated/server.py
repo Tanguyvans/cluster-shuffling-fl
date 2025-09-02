@@ -168,8 +168,9 @@ class Node:
                 loaded_data = torch.load(block.storage_reference, map_location='cpu')
                 if 'model_state' in loaded_data:
                     model_state = loaded_data['model_state']
+                    # Same as simple_resnet_fl.py: include ALL parameters except num_batches_tracked
                     loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
-                                    for name, val in model_state.items() if 'bn' not in name]
+                                    for name, val in model_state.items() if 'num_batches_tracked' not in name]
                     len_dataset_val = loaded_data.get('len_dataset', 10)
                 else:
                     # Fallback for direct weights format
@@ -197,9 +198,9 @@ class Node:
         loaded_data = torch.load(filename, map_location='cpu')
         if 'model_state' in loaded_data:
             model_state = loaded_data['model_state']
-            # Convert to list format for compatibility with existing client code
+            # Same as simple_resnet_fl.py: include ALL parameters except num_batches_tracked
             loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
-                            for name, val in model_state.items() if 'bn' not in name]
+                            for name, val in model_state.items() if 'num_batches_tracked' not in name]
         else:
             # Fallback for direct weights format
             loaded_weights = self.flower_client.get_parameters({})
@@ -350,11 +351,12 @@ class Node:
         global_model_data = torch.load(self.global_params_directory, map_location='cpu')
         if 'model_state' in global_model_data:
             model_state = global_model_data['model_state']
+            # Same as simple_resnet_fl.py: include ALL parameters except num_batches_tracked 
             global_weights_params = [val.numpy() if isinstance(val, torch.Tensor) else val 
                                    for key, val in model_state.items() 
-                                   if 'bn' not in key and 'len_dataset' not in key]
+                                   if 'num_batches_tracked' not in key and 'len_dataset' not in key]
         else:
-            # Fallback: assume direct weight list format
+            # Fallback: use flower client (now gets ALL parameters)
             global_weights_params = self.flower_client.get_parameters({})
         
         # Temporary directory for client models during usefulness check
@@ -579,9 +581,10 @@ class Node:
         model_data = torch.load(model_directory, map_location='cpu')
         if 'model_state' in model_data:
             model_state = model_data['model_state']
+            # Same as simple_resnet_fl.py: include ALL parameters except num_batches_tracked
             loaded_weights = [val.numpy() if isinstance(val, torch.Tensor) else val 
                             for key, val in model_state.items() 
-                            if 'bn' not in key and 'len_dataset' not in key]
+                            if 'num_batches_tracked' not in key and 'len_dataset' not in key]
         else:
             # Fallback for direct weights format
             loaded_weights = self.flower_client.get_parameters({})

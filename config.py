@@ -13,13 +13,13 @@ DATASET_PATHS = {
 }
 
 settings = {
-    "name_dataset": "ffhq128",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
+    "name_dataset": "cifar10",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
     "data_root": DATASET_ROOT,  # Root directory for all datasets
     "arch": "resnet18",  # ResNet18 is optimal for FFHQ128 (128x128 images)
     "pretrained": False,  # Don't use ImageNet pretrained weights for age classification
     "patience": 3,
     "batch_size": 4,  # Smaller batch size for 128x128 images (memory constraints)
-    "n_epochs": 3,
+    "n_epochs": 10,
     
     # Single batch training for inference attacks
     "single_batch_training": False,  # Set to True to train on only one batch per epoch
@@ -32,10 +32,10 @@ settings = {
     "coef_useful": 1.05,   # 1.05
     "tolerance_ceil": 0.08,
 
-    "n_rounds": 3,
+    "n_rounds": 10,
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
-    "lr": 0.001,              # Back to original LR
+    "lr": 0.01,               # Higher LR for ResNet18 from scratch
     "choice_scheduler": "StepLR",  # Re-enable StepLR to test the fix
     "step_size": 3,
     "gamma": 0.5,
@@ -46,7 +46,7 @@ settings = {
     "delta": 1e-5,
     "epsilon": 5.0,           
 
-    "clustering": True,       # RE-ENABLE MPC - Testing the fix!
+    "clustering": False,       # RE-ENABLE MPC - Testing the fix!
     "type_ss": "additif",
     "threshold": 3,
     "m": 3,
@@ -56,7 +56,7 @@ settings = {
     "save_gradients": True,                    # Enable gradient saving for attacks
     "save_gradients_rounds": [1, 2, 3],       # Which rounds to save gradients
     "use_pytorch_smpc": True,                  # Use pure PyTorch SMPC (no NumPy)
-    "aggregation_method": "gradients",         # "weights" or "gradients" - what to use for SMPC/aggregation
+    "aggregation_method": "weights",         # "weights" or "gradients" - what to use for SMPC/aggregation
                                                # "gradients": More private, smaller data, better for attacks
                                                # "weights": Traditional FL, larger data, current implementation
     
