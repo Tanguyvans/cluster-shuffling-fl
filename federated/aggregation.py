@@ -92,7 +92,7 @@ def krum(weights_results: List[Tuple[List[np.ndarray], int]],
     else:
         # Multi-Krum: aggregate selected clients
         selected_results = [weights_results[i] for i in selected_indices]
-        selection_msg = f"🎯 Multi-Krum selected clients {selected_indices.tolist()} (scores: {[scores[i]:.4f for i in selected_indices]})"
+        selection_msg = f"🎯 Multi-Krum selected clients {selected_indices.tolist()} (scores: {[f'{scores[i]:.4f}' for i in selected_indices]})"
         print(selection_msg)
         
         # Write to output file if provided
