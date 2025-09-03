@@ -15,7 +15,7 @@ DATASET_PATHS = {
 settings = {
     "name_dataset": "cifar10",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "resnet18",  # ResNet18 is optimal for FFHQ128 (128x128 images)
+    "arch": "resnet18",  # Testing Krum with simpler architecture first
     "pretrained": False,  # Don't use ImageNet pretrained weights for age classification
     "patience": 3,
     "batch_size": 4,  # Smaller batch size for 128x128 images (memory constraints)
@@ -25,7 +25,7 @@ settings = {
     "single_batch_training": False,  # Set to True to train on only one batch per epoch
     "balanced_class_training": True,  # Ensure each client gets one sample per class (like template)
     "number_of_nodes": 1,
-    "number_of_clients_per_node": 3,
+    "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
 
     "check_usefulness": False,
@@ -35,7 +35,7 @@ settings = {
     "n_rounds": 10,
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
-    "lr": 0.01,               # Higher LR for ResNet18 from scratch
+    "lr": 0.001,               # Higher LR for ResNet18 from scratch
     "choice_scheduler": "StepLR",  # Re-enable StepLR to test the fix
     "step_size": 3,
     "gamma": 0.5,
@@ -46,7 +46,7 @@ settings = {
     "delta": 1e-5,
     "epsilon": 5.0,           
 
-    "clustering": False,       # RE-ENABLE MPC - Testing the fix!
+    "clustering": False,       # Testing Krum without SMPC first
     "type_ss": "additif",
     "threshold": 3,
     "m": 3,
@@ -64,9 +64,17 @@ settings = {
     "matrix_path": "results/CFL/matrix_path",
     "roc_path": "results/CFL/roc_path",
     
+    # Aggregation method configuration
+    "aggregation": {
+        "method": "krum",  # Options: fedavg, krum, multi_krum, trimmed_mean, median
+        "krum_malicious": 2,  # Number of malicious clients to tolerate (for krum)
+        "multi_krum_keep": 3,  # Number of clients to keep (for multi_krum)
+        "trim_ratio": 0.2,  # Fraction to trim (for trimmed_mean)
+    },
+    
     # Poisoning attack configuration
     "poisoning_attacks": {
-        "enabled": False,                            # Enable poisoning attacks
+        "enabled": True,                            # Enable poisoning attacks
         "malicious_clients": ["c0_1", "c0_2"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
         "attack_type": "labelflip",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
         "attack_intensity": 0.2,                   # Attack strength (0.0 to 1.0)
