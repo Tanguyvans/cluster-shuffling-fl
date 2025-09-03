@@ -14,6 +14,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from .flower_client import FlowerClient
+from .aggregation import aggregate_with_method
+from config import settings
 
 
 def get_keys(private_key_path, public_key_path):
@@ -185,7 +187,18 @@ class Node:
         if len(params_list) == 0:
             return None
 
-        self.aggregated_params = aggregate(params_list)
+        # Get aggregation configuration
+        agg_config = settings.get('aggregation', {})
+        method = agg_config.get('method', 'fedavg')
+        
+        # Prepare aggregation arguments
+        kwargs = {
+            'num_malicious': agg_config.get('krum_malicious', 2),
+            'num_to_keep': agg_config.get('multi_krum_keep', 3),
+            'trim_ratio': agg_config.get('trim_ratio', 0.2)
+        }
+        
+        self.aggregated_params = aggregate_with_method(params_list, method, output_file=self.save_results + "output.txt", **kwargs)
 
         self.flower_client.set_parameters(self.aggregated_params)
 
@@ -431,14 +444,34 @@ class Node:
                 else:
                     print(f"[Node {self.id}] Note: Clustering disabled, using weight aggregation (gradients saved separately)")
                     useful_weights_for_agg.append((global_weights_params, 20))
-                    aggregated_weights = aggregate(useful_weights_for_agg)
-                    agg_method_desc = "weights_fedavg_gradients_saved"
+                    
+                    # Get aggregation configuration
+                    agg_config = settings.get('aggregation', {})
+                    method = agg_config.get('method', 'fedavg')
+                    kwargs = {
+                        'num_malicious': agg_config.get('krum_malicious', 2),
+                        'num_to_keep': agg_config.get('multi_krum_keep', 3),
+                        'trim_ratio': agg_config.get('trim_ratio', 0.2)
+                    }
+                    
+                    aggregated_weights = aggregate_with_method(useful_weights_for_agg, method, output_file=self.save_results + "output.txt", **kwargs)
+                    agg_method_desc = f"weights_{method}_gradients_saved"
             else:
                 print(f"[Node {self.id}] Using traditional weight-based aggregation")
                 useful_weights_for_agg.append((global_weights_params, 20)) 
                 print(f"[Node {self.id}] Added current global model to the aggregation set (effective models for agg: {len(useful_weights_for_agg)}).")
-                aggregated_weights = aggregate(useful_weights_for_agg)
-                agg_method_desc = "fedavg_with_usefulness_check"
+                
+                # Get aggregation configuration
+                agg_config = settings.get('aggregation', {})
+                method = agg_config.get('method', 'fedavg')
+                kwargs = {
+                    'num_malicious': agg_config.get('krum_malicious', 2),
+                    'num_to_keep': agg_config.get('multi_krum_keep', 3),
+                    'trim_ratio': agg_config.get('trim_ratio', 0.2)
+                }
+                
+                aggregated_weights = aggregate_with_method(useful_weights_for_agg, method, output_file=self.save_results + "output.txt", **kwargs)
+                agg_method_desc = f"{method}_with_usefulness_check"
             
             print(f"[Node {self.id}] Completed {aggregation_method}-based aggregation.")
             metrics = self.flower_client.evaluate(aggregated_weights, {})
