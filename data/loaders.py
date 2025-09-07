@@ -4,6 +4,7 @@ from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
 import random
 import os
+import numpy as np
 
 # Normalization values for the different datasets
 NORMALIZE_DICT = {
@@ -243,6 +244,67 @@ def load_data_from_path(resize=None, name_dataset="cifar10", data_root="./data/"
         raise ValueError("The dataset name is not correct")
 
     return dataset_train, dataset_test
+
+
+def create_server_root_dataset(dataset_train, root_size=100, seed=42):
+    """
+    Create a small balanced root dataset for FLTrust server model.
+    
+    Args:
+        dataset_train: Full training dataset
+        root_size: Size of root dataset (default 100 as per FLTrust paper)
+        seed: Random seed for reproducible sampling
+        
+    Returns:
+        (x_server, y_server): Tuple of server training data
+    """
+    import numpy as np
+    
+    np.random.seed(seed)
+    random.seed(seed)
+    
+    # Get number of classes
+    if hasattr(dataset_train, 'classes'):
+        num_classes = len(dataset_train.classes)
+    else:
+        # Infer from data
+        all_labels = []
+        for _, label in dataset_train:
+            all_labels.append(label)
+        num_classes = len(set(all_labels))
+    
+    samples_per_class = max(1, root_size // num_classes)
+    
+    # Sample balanced data for each class
+    class_samples = {i: [] for i in range(num_classes)}
+    
+    # Collect all samples by class
+    for idx, (x, y) in enumerate(dataset_train):
+        if len(class_samples[y]) < samples_per_class:
+            class_samples[y].append((x, y))
+    
+    # Combine all selected samples
+    server_data = []
+    for class_id in range(num_classes):
+        server_data.extend(class_samples[class_id][:samples_per_class])
+    
+    # Shuffle the server dataset
+    random.shuffle(server_data)
+    
+    # Extract features and labels
+    x_server = []
+    y_server = []
+    
+    for x, y in server_data:
+        x_server.append(x)
+        y_server.append(y)
+    
+    print(f"Created server root dataset with {len(x_server)} samples ({samples_per_class} per class)")
+    
+    # Keep as list for FlowerClient compatibility
+    # x_server and y_server are already lists of individual samples
+    
+    return (x_server, y_server)
 
 
 def load_dataset(resize=None, name_dataset="cifar", data_root="./data/", number_of_clients_per_node=3, number_of_nodes=3):

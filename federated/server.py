@@ -74,7 +74,7 @@ def start_server(host, port, handle_message, num_node):
 
 
 class Node:
-    def __init__(self, id, host, port, test, save_results, check_usefulness=True, coef_useful=1.05, tolerance_ceil=0.06, metrics_tracker=None, model_manager=None, **kwargs):
+    def __init__(self, id, host, port, test, save_results, check_usefulness=True, coef_useful=1.05, tolerance_ceil=0.06, metrics_tracker=None, model_manager=None, server_root_data=None, **kwargs):
         if model_manager is None:
             raise ValueError("ModelManager is mandatory for Node. Cannot create Node without ModelManager.")
             
@@ -96,6 +96,11 @@ class Node:
         self.model_manager = model_manager
         self.received_weights_info = [] # Initialize to store (weights, num_examples, client_id)
 
+        # FLTrust server model setup
+        self.server_root_data = server_root_data  # (x_server, y_server) tuple
+        self.server_model_params = None
+        self.previous_global_params = None
+
         private_key_path = f"keys/{id}_private_key.pem"
         public_key_path = f"keys/{id}_public_key.pem"
         self.get_keys(private_key_path, public_key_path)
@@ -107,6 +112,22 @@ class Node:
             y_test=y_test,
             **kwargs
         )
+
+        # Create server model for FLTrust if root data provided
+        if self.server_root_data is not None:
+            # Create server flower client using client method (which accepts training data)
+            x_server, y_server = self.server_root_data
+            self.server_flower_client = FlowerClient.client(
+                x_train=x_server,
+                y_train=y_server,
+                x_val=x_test,  # Use test data as validation
+                y_val=y_test,
+                x_test=x_test,
+                y_test=y_test,
+                **kwargs
+            )
+        else:
+            self.server_flower_client = None
 
         self.clusters = []  # Add this line
 
@@ -287,7 +308,8 @@ class Node:
             processing_list = self.received_weights_info
             print(f"\n[Node {self.id}] Starting aggregation for round {index} with {len(processing_list)} received client models.")
             actual_client_ids = [info[2] for info in processing_list] # info is (weights, num_ex, client_id)
-            print(f"[Node {self.id}] Contributing clients: {', '.join(sorted(actual_client_ids))}")
+            print(f"[Node {self.id}] Contributing clients (in processing order): {actual_client_ids}")
+            print(f"[Node {self.id}] Contributing clients (sorted): {', '.join(sorted(actual_client_ids))}")
         else:
             # No models passed as argument and no models received from clients
             processing_list = []
@@ -451,27 +473,59 @@ class Node:
                     kwargs = {
                         'num_malicious': agg_config.get('krum_malicious', 2),
                         'num_to_keep': agg_config.get('multi_krum_keep', 3),
-                        'trim_ratio': agg_config.get('trim_ratio', 0.2)
+                        'trim_ratio': agg_config.get('trim_ratio', 0.2),
+                        'client_ids': useful_client_ids_log  # Pass client IDs for proper mapping
                     }
                     
                     aggregated_weights = aggregate_with_method(useful_weights_for_agg, method, output_file=self.save_results + "output.txt", **kwargs)
                     agg_method_desc = f"weights_{method}_gradients_saved"
             else:
                 print(f"[Node {self.id}] Using traditional weight-based aggregation")
-                useful_weights_for_agg.append((global_weights_params, 20)) 
-                print(f"[Node {self.id}] Added current global model to the aggregation set (effective models for agg: {len(useful_weights_for_agg)}).")
                 
                 # Get aggregation configuration
                 agg_config = settings.get('aggregation', {})
                 method = agg_config.get('method', 'fedavg')
-                kwargs = {
-                    'num_malicious': agg_config.get('krum_malicious', 2),
-                    'num_to_keep': agg_config.get('multi_krum_keep', 3),
-                    'trim_ratio': agg_config.get('trim_ratio', 0.2)
-                }
                 
-                aggregated_weights = aggregate_with_method(useful_weights_for_agg, method, output_file=self.save_results + "output.txt", **kwargs)
-                agg_method_desc = f"{method}_with_usefulness_check"
+                # Store previous global weights before aggregation (for FLTrust)
+                if self.previous_global_params is None:
+                    self.previous_global_params = global_weights_params
+                
+                # FLTrust specific handling
+                if method == 'fltrust':
+                    # Train server model first
+                    server_weights = self.train_server_model(global_weights_params, index)
+                    if server_weights is not None:
+                        kwargs = {
+                            'server_weights': server_weights,
+                            'previous_weights': self.previous_global_params,
+                            'learning_rate': agg_config.get('fltrust_learning_rate', 0.01),
+                            'client_ids': useful_client_ids_log  # Pass the client IDs for proper mapping
+                        }
+                        # Only use client weights for FLTrust (don't add global model)
+                        fltrust_weights = [(params, num_ex) for params, num_ex in useful_weights_for_agg]
+                        aggregated_weights = aggregate_with_method(fltrust_weights, method, output_file=self.save_results + "output.txt", **kwargs)
+                        agg_method_desc = f"fltrust_with_usefulness_check"
+                    else:
+                        # Fallback to FedAvg if server training failed
+                        print(f"[Node {self.id}] Server training failed, falling back to FedAvg")
+                        useful_weights_for_agg.append((global_weights_params, 20))
+                        aggregated_weights = aggregate_with_method(useful_weights_for_agg, 'fedavg', output_file=self.save_results + "output.txt")
+                        agg_method_desc = f"fedavg_fallback_with_usefulness_check"
+                else:
+                    # Standard aggregation methods (not FLTrust) - don't add global model
+                    print(f"[Node {self.id}] Using standard aggregation with {len(useful_weights_for_agg)} client models only.")
+                    kwargs = {
+                        'num_malicious': agg_config.get('krum_malicious', 2),
+                        'num_to_keep': agg_config.get('multi_krum_keep', 3),
+                        'trim_ratio': agg_config.get('trim_ratio', 0.2),
+                        'client_ids': useful_client_ids_log  # Pass client IDs for proper mapping
+                    }
+                    
+                    aggregated_weights = aggregate_with_method(useful_weights_for_agg, method, output_file=self.save_results + "output.txt", **kwargs)
+                    agg_method_desc = f"{method}_with_usefulness_check"
+                
+                # Store current weights as previous for next round
+                self.previous_global_params = aggregated_weights
             
             print(f"[Node {self.id}] Completed {aggregation_method}-based aggregation.")
             metrics = self.flower_client.evaluate(aggregated_weights, {})
@@ -741,3 +795,31 @@ class Node:
         print(f"[Node {self.id}] Updated {len(updated_params)} parameter tensors")
         
         return updated_params
+
+    def train_server_model(self, global_params, round_num):
+        """
+        Train server model on root dataset for FLTrust
+        """
+        if self.server_flower_client is None or self.server_root_data is None:
+            print(f"[Node {self.id}] Warning: No server root data for FLTrust. Skipping server training.")
+            return None
+        
+        print(f"[Node {self.id}] Training server model on root dataset for round {round_num}")
+        
+        # Set server model to current global parameters
+        self.server_flower_client.set_parameters(global_params)
+        
+        # Train server model for multiple epochs on root dataset  
+        from config import settings
+        server_epochs = settings.get('aggregation', {}).get('fltrust_server_epochs', 3)
+        fit_config = {"epochs": server_epochs}
+        server_result = self.server_flower_client.fit(global_params, fit_config, {})
+        
+        self.server_model_params = server_result[0]  # Updated server parameters
+        
+        # Debug: Evaluate server model performance
+        server_metrics = self.server_flower_client.evaluate(self.server_model_params, {})
+        print(f"[Node {self.id}] Server model training completed for round {round_num}")
+        print(f"[Node {self.id}] 🔍 Server model performance: loss={server_metrics.get('test_loss', 'N/A'):.4f}, acc={server_metrics.get('test_acc', 'N/A'):.2f}%")
+        
+        return self.server_model_params

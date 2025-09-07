@@ -15,11 +15,11 @@ DATASET_PATHS = {
 settings = {
     "name_dataset": "cifar10",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "resnet18",  # Testing Krum with simpler architecture first
+    "arch": "simplenet",  # Testing Krum with simpler architecture first
     "pretrained": False,  # Don't use ImageNet pretrained weights for age classification
     "patience": 3,
     "batch_size": 4,  # Smaller batch size for 128x128 images (memory constraints)
-    "n_epochs": 10,
+    "n_epochs": 3,
     
     # Single batch training for inference attacks
     "single_batch_training": False,  # Set to True to train on only one batch per epoch
@@ -66,18 +66,21 @@ settings = {
     
     # Aggregation method configuration
     "aggregation": {
-        "method": "krum",  # Options: fedavg, krum, multi_krum, trimmed_mean, median
-        "krum_malicious": 2,  # Number of malicious clients to tolerate (for krum)
+        "method": "krum",  # Options: fedavg, krum, multi_krum, trimmed_mean, median, fltrust
+        "krum_malicious": 1,  # Number of malicious clients to tolerate (for krum)
         "multi_krum_keep": 3,  # Number of clients to keep (for multi_krum)
         "trim_ratio": 0.2,  # Fraction to trim (for trimmed_mean)
+        "fltrust_root_size": 5000,  # Size of server's root dataset for FLTrust (increased)
+        "fltrust_learning_rate": 0.01,  # Learning rate for FLTrust server model
+        "fltrust_server_epochs": 3,  # Number of epochs for server training
     },
     
     # Poisoning attack configuration
     "poisoning_attacks": {
         "enabled": True,                            # Enable poisoning attacks
-        "malicious_clients": ["c0_1", "c0_2"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
-        "attack_type": "labelflip",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
-        "attack_intensity": 0.2,                   # Attack strength (0.0 to 1.0)
+        "malicious_clients": ["c0_1"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
+        "attack_type": "noise",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
+        "attack_intensity": 1.0,                   # Attack strength (0.0 to 1.0)
         "attack_rounds": None,                     # Specific rounds to attack (None = all rounds)
         "attack_frequency": 1.0,                   # Probability of attacking each round
         

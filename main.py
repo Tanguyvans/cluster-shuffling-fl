@@ -53,6 +53,23 @@ if __name__ == "__main__":
         settings['n_clients'],
         1
     )
+    
+    # Create server root dataset for FLTrust if needed
+    server_root_data = None
+    if settings.get('aggregation', {}).get('method') == 'fltrust':
+        from data.loaders import load_data_from_path, create_server_root_dataset
+        
+        # Load the full training dataset
+        dataset_train, _ = load_data_from_path(
+            resize=length, 
+            name_dataset=settings['name_dataset'],
+            data_root=settings['data_root']
+        )
+        
+        # Create root dataset
+        root_size = settings.get('aggregation', {}).get('fltrust_root_size', 100)
+        server_root_data = create_server_root_dataset(dataset_train, root_size=root_size)
+        print(f"FLTrust: Created server root dataset with {len(server_root_data[0])} samples")
 
 
     # Create the server entity
@@ -66,6 +83,7 @@ if __name__ == "__main__":
         dp=settings['diff_privacy'], 
         model_choice=settings['arch'],
         model_manager=model_manager,
+        server_root_data=server_root_data,
         batch_size=settings['batch_size'],
         classes=list_classes, 
         choice_loss=settings['choice_loss'],
