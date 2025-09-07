@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick References
+
+For specific deployment tasks, check these documentation files:
+
+- **vastai-deployment**: Available in `docs/vastai-deployment.md` - Deploy applications on high-performance GPU instances using Vast.AI
 ## Commands
 
 ### Running the System

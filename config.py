@@ -15,7 +15,7 @@ DATASET_PATHS = {
 settings = {
     "name_dataset": "ffhq128",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "simplenet",  # Testing Krum with simpler architecture first
+    "arch": "resnet18",  # Testing Krum with simpler architecture first
     "pretrained": False,  # Don't use ImageNet pretrained weights for age classification
     "patience": 3,
     "batch_size": 4,  # Smaller batch size for 128x128 images (memory constraints)
@@ -72,12 +72,12 @@ settings = {
         "trim_ratio": 0.2,  # Fraction to trim (for trimmed_mean)
         "fltrust_root_size": 5000,  # Size of server's root dataset for FLTrust (increased)
         "fltrust_learning_rate": 0.01,  # Learning rate for FLTrust server model
-        "fltrust_server_epochs": 3,  # Number of epochs for server training
+        "fltrust_server_epochs": 5,  # Number of epochs for server training
     },
     
     # Poisoning attack configuration
     "poisoning_attacks": {
-        "enabled": True,                            # Enable poisoning attacks
+        "enabled": False,                            # Enable poisoning attacks
         "malicious_clients": ["c0_1"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
         "attack_type": "noise",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
         "attack_intensity": 1.0,                   # Attack strength (0.0 to 1.0)
