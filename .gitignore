@@ -12,6 +12,9 @@ trained_models.npz
 /federated_simple_gradients
 /federated_simple_models
 *.pyc
+*.tar.gz
+docs/
+.aicraft
 
 # Large model files
 GIFD_Gradient_Inversion_Attack/inversefed/genmodels/stylegan2_ada_pytorch/cifar10.pkl
