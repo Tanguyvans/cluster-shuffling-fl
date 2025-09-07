@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-# Dataset root directory - uses ~/data as the centralized location
-DATASET_ROOT = os.path.expanduser('~/data')
+# Dataset root directory - uses local dataset/ directory in project
+DATASET_ROOT = os.path.join(os.path.dirname(__file__), 'dataset')
 
 # Specific dataset paths
 DATASET_PATHS = {
@@ -13,7 +13,7 @@ DATASET_PATHS = {
 }
 
 settings = {
-    "name_dataset": "cifar10",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
+    "name_dataset": "ffhq128",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
     "data_root": DATASET_ROOT,  # Root directory for all datasets
     "arch": "simplenet",  # Testing Krum with simpler architecture first
     "pretrained": False,  # Don't use ImageNet pretrained weights for age classification
