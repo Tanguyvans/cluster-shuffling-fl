@@ -4,7 +4,7 @@ from .server import Node
 from config import settings
 
 
-def create_nodes(test_sets, number_of_nodes, save_results, check_usefulness, coef_useful, tolerance_ceil, model_manager=None, **kwargs):
+def create_nodes(test_sets, number_of_nodes, save_results, check_usefulness, coef_useful, tolerance_ceil, model_manager=None, server_root_data=None, **kwargs):
     list_nodes = []
     for i in range(number_of_nodes):
         list_nodes.append(
@@ -18,6 +18,7 @@ def create_nodes(test_sets, number_of_nodes, save_results, check_usefulness, coe
                 coef_useful=coef_useful,
                 tolerance_ceil=tolerance_ceil,
                 model_manager=model_manager,
+                server_root_data=server_root_data,
                 **kwargs
             )
         )
