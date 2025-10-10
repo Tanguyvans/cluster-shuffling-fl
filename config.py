@@ -15,15 +15,18 @@ DATASET_PATHS = {
 settings = {
     "name_dataset": "ffhq128",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "resnet18",  # Testing Krum with simpler architecture first
-    "pretrained": False,  # Don't use ImageNet pretrained weights for age classification
+    "arch": "resnet18",  # ResNet18 matching train_ffhq_resnet.py
+    "pretrained": False,  # Don't use ImageNet pretrained weights (train from scratch like train_ffhq_resnet.py)
+    "input_size": 32,  # 32x32 input size to match train_ffhq_resnet.py and GIAS core
     "patience": 3,
-    "batch_size": 4,  # Smaller batch size for 128x128 images (memory constraints)
-    "n_epochs": 3,
-    
-    # Single batch training for inference attacks
-    "single_batch_training": False,  # Set to True to train on only one batch per epoch
-    "balanced_class_training": True,  # Ensure each client gets one sample per class (like template)
+    "batch_size": 1,  # Batch size of 1 to match train_ffhq_resnet.py
+    "n_epochs": 1,     # Single epoch like train_ffhq_resnet.py
+    "num_classes": 6,  # 6 age groups matching train_ffhq_resnet.py (0-10, 10-20, 20-30, 30-40, 40-50, 50+)
+
+    # Single batch training for inference attacks - MATCHING train_ffhq_resnet.py
+    "single_batch_training": True,   # Train on only one batch per epoch
+    "balanced_class_training": True, # Ensure each client gets balanced samples
+    "max_samples_per_client": 1,     # Exactly 1 sample per client (matching train_ffhq_resnet.py)
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
@@ -32,13 +35,14 @@ settings = {
     "coef_useful": 1.05,   # 1.05
     "tolerance_ceil": 0.08,
 
-    "n_rounds": 10,
+    "n_rounds": 3,  # Fewer rounds for focused gradient attack evaluation
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
-    "lr": 0.001,               # Higher LR for ResNet18 from scratch
-    "choice_scheduler": "StepLR",  # Re-enable StepLR to test the fix
-    "step_size": 3,
-    "gamma": 0.5,
+    "lr": 0.001,               # Learning rate matching train_ffhq_resnet.py
+    "weight_decay": 1e-4,      # Weight decay matching train_ffhq_resnet.py
+    "choice_scheduler": "StepLR",
+    "step_size": 2,            # Step size matching train_ffhq_resnet.py
+    "gamma": 0.1,              # Gamma matching train_ffhq_resnet.py
 
     "diff_privacy": False,
     "noise_multiplier": 0.1,  
@@ -54,7 +58,7 @@ settings = {
 
     # New settings for PyTorch-based SMPC and gradient saving
     "save_gradients": True,                    # Enable gradient saving for attacks
-    "save_gradients_rounds": [1, 2, 3],       # Which rounds to save gradients
+    "save_gradients_rounds": [1, 2, 3],       # Which rounds to save gradients (all rounds for small dataset)
     "use_pytorch_smpc": True,                  # Use pure PyTorch SMPC (no NumPy)
     "aggregation_method": "weights",         # "weights" or "gradients" - what to use for SMPC/aggregation
                                                # "gradients": More private, smaller data, better for attacks

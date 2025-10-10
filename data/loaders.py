@@ -13,8 +13,8 @@ NORMALIZE_DICT = {
     'cifar100': dict(mean=(0.5071, 0.4867, 0.4408), std=(0.2675, 0.2565, 0.2761)),
     'alzheimer': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     'caltech256': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-    'ffhq': dict(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),  # Standard normalization for faces
-    'ffhq128': dict(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    'ffhq': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),  # ImageNet normalization (matching train_ffhq_resnet.py)
+    'ffhq128': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),  # ImageNet normalization (matching train_ffhq_resnet.py)
 }
 
 
@@ -47,36 +47,64 @@ def select_balanced_batch_per_client(dataset, num_classes, seed_offset=0):
     return selected_indices, sorted(selected_labels)
 
 
-def splitting_dataset(dataset, nb_clients):
+def splitting_dataset(dataset, nb_clients, max_samples_per_client=None):
     random.seed(42)
-    
+
     # Group data by class
     class_data = {}
     for data, target in dataset:
         if target not in class_data:
             class_data[target] = []
         class_data[target].append((data, target))
-    
+
     # Initialize client datasets
     clients_dataset = [[[], []] for _ in range(nb_clients)]
-    
-    # First pass: distribute samples from each class evenly
+
+    # If max_samples_per_client is specified, create balanced batches for gradient attacks
+    if max_samples_per_client:
+        print(f"Creating balanced batches with {max_samples_per_client} samples per client")
+
+        # Get number of classes to ensure balanced distribution
+        num_classes = len(class_data)
+
+        # For each client, select a balanced batch
+        for client_idx in range(nb_clients):
+            # Use balanced selection for each client
+            client_indices, client_labels = select_balanced_batch_per_client(
+                dataset, max_samples_per_client, seed_offset=client_idx
+            )
+
+            # Add selected data to client
+            for idx in client_indices:
+                data, target = dataset[idx]
+                clients_dataset[client_idx][0].append(data)
+                clients_dataset[client_idx][1].append(target)
+
+        print(f"Created {nb_clients} client datasets with {max_samples_per_client} samples each")
+        return clients_dataset
+
+    # First pass: distribute samples from each class evenly (original logic)
     for class_label, samples in class_data.items():
         samples = samples.copy()
         random.shuffle(samples)
-        
+
         # Ensure each client gets at least one sample from each class if possible
         if len(samples) >= nb_clients:
             for client_idx in range(nb_clients):
                 data, target = samples.pop()
                 clients_dataset[client_idx][0].append(data)
                 clients_dataset[client_idx][1].append(target)
-        
-        # Distribute remaining samples round-robin
+
+        # Distribute remaining samples round-robin (respecting max_samples_per_client if set)
         while samples:
             for client_idx in range(nb_clients):
                 if not samples:
                     break
+
+                # Check max_samples_per_client limit
+                if max_samples_per_client and len(clients_dataset[client_idx][0]) >= max_samples_per_client:
+                    continue
+
                 data, target = samples.pop()
                 clients_dataset[client_idx][0].append(data)
                 clients_dataset[client_idx][1].append(target)
@@ -142,7 +170,7 @@ def split_data_client(dataset, num_clients, seed):
     return ds
 
 
-def load_data_from_path(resize=None, name_dataset="cifar10", data_root="./data/"):
+def load_data_from_path(resize=None, name_dataset="cifar10", data_root="./data/", max_samples=None):
     data_folder = f"{data_root}/{name_dataset}"
     
     if name_dataset == "caltech256":
@@ -217,7 +245,7 @@ def load_data_from_path(resize=None, name_dataset="cifar10", data_root="./data/"
         ])
         
         # Create full dataset with age labels (10 classes) like GIFD
-        full_dataset = FFHQDataset(image_dir, json_dir, transform=transform, label_type='age')
+        full_dataset = FFHQDataset(image_dir, json_dir, transform=transform, label_type='age', max_samples=max_samples)
         
         # Following GIFD approach: use subset for training if dataset is large
         total_size = len(full_dataset)
@@ -307,12 +335,21 @@ def create_server_root_dataset(dataset_train, root_size=100, seed=42):
     return (x_server, y_server)
 
 
-def load_dataset(resize=None, name_dataset="cifar", data_root="./data/", number_of_clients_per_node=3, number_of_nodes=3):
-    # Case for the classification problems
-    dataset_train, dataset_test = load_data_from_path(resize, name_dataset, data_root)
+def load_dataset(resize=None, name_dataset="cifar", data_root="./data/", number_of_clients_per_node=3, number_of_nodes=3, max_samples_per_client=None):
+    # Calculate total samples needed if limiting per client
+    max_samples_total = None
+    if max_samples_per_client:
+        total_clients = number_of_clients_per_node * number_of_nodes
+        max_samples_total = total_clients * max_samples_per_client * 3  # 3x for train/val/test split buffer
+        print(f"Limiting dataset loading: {max_samples_per_client} samples/client × {total_clients} clients = {max_samples_total} total samples (with buffer)")
 
-    client_train_sets = splitting_dataset(dataset_train, number_of_clients_per_node * number_of_nodes)
-    client_test_sets = splitting_dataset(dataset_test, number_of_clients_per_node * number_of_nodes)
+    # Case for the classification problems
+    dataset_train, dataset_test = load_data_from_path(resize, name_dataset, data_root, max_samples=max_samples_total)
+
+    # Pass max_samples_per_client to splitting_dataset to enforce the limit
+    total_clients = number_of_clients_per_node * number_of_nodes
+    client_train_sets = splitting_dataset(dataset_train, total_clients, max_samples_per_client)
+    client_test_sets = splitting_dataset(dataset_test, total_clients, max_samples_per_client)
     # client_train_sets = split_data_client(dataset_train, number_of_clients_per_node * number_of_nodes, seed=42)
     # client_test_sets = split_data_client(dataset_test, number_of_clients_per_node * number_of_nodes, seed=42)
 

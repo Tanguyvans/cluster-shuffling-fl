@@ -48,10 +48,12 @@ if __name__ == "__main__":
         f.write("")
 
     client_train_sets, client_test_sets, node_test_sets, list_classes = load_dataset(
-        length, settings['name_dataset'],
-        settings['data_root'],
-        settings['n_clients'],
-        1
+        resize=length,
+        name_dataset=settings['name_dataset'],
+        data_root=settings['data_root'],
+        number_of_clients_per_node=settings.get('number_of_clients_per_node', 6),
+        number_of_nodes=settings.get('number_of_nodes', 1),
+        max_samples_per_client=settings.get('max_samples_per_client', None)
     )
     
     # Create server root dataset for FLTrust if needed
@@ -187,6 +189,7 @@ if __name__ == "__main__":
                 client.dataset_name = settings['name_dataset']
                 client.model_architecture = settings['arch']
                 client.num_classes = len(list_classes)
+                client.single_batch_training = settings.get('single_batch_training', False)
         
         threads = []
         for client in node_clients.values():

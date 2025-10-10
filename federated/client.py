@@ -43,8 +43,13 @@ class Client:
         x_train, y_train = train
         x_test, y_test = test
 
-        x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=42,
-                                                          stratify=None)
+        # Handle single-sample training (for gradient inversion attacks)
+        # If only 1 sample, use same sample for train and val (like train_ffhq_resnet.py)
+        if len(x_train) == 1:
+            x_val, y_val = x_train, y_train
+        else:
+            x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=42,
+                                                              stratify=None)
 
         # Filter out Client-specific kwargs before passing to FlowerClient
         flower_kwargs = {k: v for k, v in kwargs.items() 
