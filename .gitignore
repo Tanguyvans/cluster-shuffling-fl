@@ -18,3 +18,9 @@ docs/
 
 # Large model files
 GIFD_Gradient_Inversion_Attack/inversefed/genmodels/stylegan2_ada_pytorch/cifar10.pkl
+exploitai/attacks/inference/gifd_core/genmodels/stylegan2/Gs.pth
+*.pth
+*.ckpt
+*.h5
+*.pb
+*.onnx
