@@ -226,22 +226,81 @@ python3 simple_gradient_attack.py
 
 ```
 cluster-shuffling-fl/
-├── main.py                    # Main federated learning orchestrator
-├── config.py                  # Configuration settings
-├── flowerclient.py           # Flower FL client implementation
-├── mia_attack.py             # Membership inference attack
-├── breaching_attack/         # Gradient inversion attacks
-│   ├── simple_gradient_attack.py
-│   └── data/                 # Attack datasets
-├── going_modular/            # Core FL modules
-│   ├── model.py             # Neural network architectures
-│   ├── engine.py            # Training/evaluation engine
-│   ├── security.py          # SMPC and privacy mechanisms
-│   ├── data_setup.py        # Dataset handling
-│   └── utils.py             # Utility functions
-├── results/                  # Training results and metrics
-├── models/                   # Saved model checkpoints
-└── requirements.txt          # Python dependencies
+├── main.py                          # Main federated learning orchestrator
+├── config.py                        # Centralized configuration settings
+├── ATTACK_GUIDE.md                  # Comprehensive attack usage guide
+├── CLAUDE.md                        # Project documentation for Claude Code
+│
+├── federated/                       # Federated learning implementation
+│   ├── client.py                   # Client class for local training
+│   ├── server.py                   # Node class for coordination
+│   ├── aggregation.py              # Aggregation strategies
+│   ├── training.py                 # Training and evaluation logic
+│   ├── flower_client.py            # Flower framework wrapper
+│   └── factory.py                  # Factory functions for nodes/clients
+│
+├── models/                          # Neural network architectures
+│   ├── factory.py                  # Model factory pattern
+│   └── architectures/              # Model implementations
+│       ├── simple_net.py           # Lightweight CNN
+│       ├── conv_net.py             # Vulnerable ConvNet for testing
+│       ├── mobilenet.py            # MobileNet architecture
+│       ├── resnet.py               # ResNet variants
+│       ├── shuffle_net.py          # ShuffleNet architecture
+│       ├── squeeze_net.py          # SqueezeNet architecture
+│       └── efficient_net.py        # EfficientNet architecture
+│
+├── data/                            # Dataset management
+│   ├── loaders.py                  # CIFAR-10/100, Caltech256 loaders
+│   └── ffhq_dataset.py             # FFHQ face dataset loader
+│
+├── security/                        # Privacy-preserving mechanisms
+│   └── secret_sharing.py           # Additive and Shamir secret sharing
+│
+├── attacks/                         # Attack framework
+│   ├── poisoning/                  # Poisoning attacks
+│   │   ├── base_poisoning_attack.py      # Abstract base class
+│   │   ├── attack_factory.py             # Attack factory pattern
+│   │   ├── labelflip_attack.py           # Label flipping attacks
+│   │   ├── ipm_attack.py                 # Inner Product Manipulation
+│   │   ├── signflip_attack.py            # Sign flipping attacks
+│   │   ├── noise_attack.py               # Noise injection attacks
+│   │   ├── alie_attack.py                # A Little Is Enough attack
+│   │   ├── backdoor_attack.py            # Backdoor attacks
+│   │   └── evaluation.py                 # Attack metrics
+│   └── utils/                      # Attack utilities
+│       ├── data_loader.py          # Attack data loading
+│       ├── metrics.py              # Attack evaluation metrics
+│       └── visualization.py        # Attack visualization
+│
+├── utils/                           # Utility modules
+│   ├── model_manager.py            # Centralized model/gradient management
+│   ├── model_metadata.py           # Model metadata handling
+│   ├── model_paths.py              # Path management
+│   ├── system_metrics.py           # Energy, communication, time tracking
+│   ├── metrics.py                  # Training metrics
+│   ├── visualization.py            # Visualization utilities
+│   ├── device.py                   # Device management
+│   └── optimization.py             # Optimization utilities
+│
+├── core/                            # Core training logic
+│   └── training.py                 # Training orchestration
+│
+├── mia_attack.py                    # Membership inference attack
+├── run_inference_attack.py          # Gradient inversion attack runner
+├── attack_fl_ffhq.py                # FFHQ-specific attack script
+├── attack_ffhq.py                   # Alternative FFHQ attack implementation
+├── train_ffhq_resnet.py             # FFHQ ResNet training
+│
+├── results/                         # Training results and metrics
+│   └── [experiment_name]/
+│       ├── models/                 # Saved models per round
+│       ├── logs/                   # Training logs
+│       ├── metrics/                # System metrics
+│       └── config.json             # Experiment configuration
+│
+├── keys/                            # RSA keys for SMPC
+└── requirements.txt                 # Python dependencies
 ```
 
 ## Contributing

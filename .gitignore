@@ -24,3 +24,26 @@ exploitai/attacks/inference/gifd_core/genmodels/stylegan2/Gs.pth
 *.h5
 *.pb
 *.onnx
+
+# macOS
+.DS_Store
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Backup files
+*.bak
+*.backup

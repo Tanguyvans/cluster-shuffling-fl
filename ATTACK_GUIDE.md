@@ -195,3 +195,100 @@ python run_grad_inv.py --compare quick_test default aggressive
 ```
 
 This gives you comprehensive privacy evaluation across different attack intensities and defense mechanisms.
+
+---
+
+## 🖼️ FFHQ (Face) Dataset Attacks
+
+For gradient inversion attacks on **FFHQ (Flickr-Faces-High-Quality) datasets**, use the dedicated `attack_fl_ffhq.py` script. This script supports specialized attack types optimized for face reconstruction.
+
+### Attack Types Available
+
+1. **GIAS** - Gradient Inversion Attack with Adaptive Selection
+2. **GIFD** - Gradient Inversion from Federated Data with generative priors
+3. **Gradient Inversion** - Standard reconstruction attack
+
+### Quick Start Examples
+
+```bash
+# Attack with default settings (auto-detects experiment)
+python3 attack_fl_ffhq.py --attack-type gias
+
+# Attack specific experiment, round, and client
+python3 attack_fl_ffhq.py --experiment ffhq128_classic_c6_r3 --round 1 --client c0_1 --attack-type gifd
+
+# Attack using direct model path
+python3 attack_fl_ffhq.py --model-path results/ffhq128_classic_c6_r3 --round 2 --client c0_3 --attack-type gradient_inversion
+```
+
+### Command Line Arguments
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--experiment` | str | auto-detect | Experiment name (directory in results/) |
+| `--round` | int | 1 | FL round to attack |
+| `--client` | str | c0_1 | Client ID to attack |
+| `--attack-type` | str | gias | Attack type: gias, gifd, gradient_inversion |
+| `--model-path` | str | None | Direct path to experiment directory |
+
+### FFHQ Attack Examples
+
+#### GIAS Attack (High-Quality Reconstruction)
+
+```bash
+# GIAS attack with face-optimized configuration
+python3 attack_fl_ffhq.py --experiment ffhq128_classic_c6_r3 --attack-type gias --round 2 --client c0_1
+
+# Attack early rounds to test privacy leakage in first training stages
+python3 attack_fl_ffhq.py --attack-type gias --rounds 1 2 3
+```
+
+#### GIFD Attack (Generative Model Prior)
+
+```bash
+# GIFD attack using StyleGAN2/BigGAN for enhanced face reconstruction
+python3 attack_fl_ffhq.py --experiment ffhq128_classic_c6_r3 --attack-type gifd --round 2 --client c0_1
+```
+
+#### Standard Gradient Inversion
+
+```bash
+# Traditional gradient inversion on FFHQ models
+python3 attack_fl_ffhq.py --attack-type gradient_inversion --round 1 --client c0_2
+```
+
+### Auto-Detection Features
+
+The script automatically:
+
+- Detects the latest FFHQ experiment if none specified
+- Identifies correct model input dimensions (128x128 for FFHQ)
+- Uses FFHQ-specific normalization parameters
+- Loads compatible model architectures
+
+### Output Files
+
+FFHQ attacks generate experiment-specific output files:
+
+```text
+fl_{experiment}_r{round}_{client}_{attack_type}_results.png  # Visual comparison
+fl_{experiment}_r{round}_{client}_{attack_type}_results.pth  # Full results data
+fl_{experiment}_r{round}_{client}_{attack_type}_metrics.json # Numerical metrics
+```
+
+### Example Workflow
+
+```bash
+# 1. Train FFHQ models with privacy defenses
+python3 main.py  # with name_dataset: "ffhq128" in config.py
+
+# 2. Attack with multiple methods
+python3 attack_fl_ffhq.py --attack-type gias --round 1
+python3 attack_fl_ffhq.py --attack-type gifd --round 1
+python3 attack_fl_ffhq.py --attack-type gradient_inversion --round 1
+
+# 3. Compare attack quality metrics
+cat fl_*_metrics.json | grep psnr
+```
+
+🎯 **FFHQ vs CIFAR Attacks**: Use `attack_fl_ffhq.py` for face datasets and `run_grad_inv.py` for CIFAR/non-face datasets. The FFHQ script is optimized for face reconstruction quality (128x128).
