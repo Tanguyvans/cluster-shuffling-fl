@@ -13,7 +13,6 @@ trained_models.npz
 /federated_simple_models
 *.pyc
 *.tar.gz
-docs/
 .aicraft
 
 # Large model files

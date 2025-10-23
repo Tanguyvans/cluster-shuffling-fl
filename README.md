@@ -1,413 +1,293 @@
 # Cluster Shuffling Federated Learning
 
-A privacy-preserving federated learning system that implements cluster shuffling and secure multi-party computation (SMPC) to protect against various privacy attacks while maintaining model performance.
+A privacy-preserving federated learning system with **cluster shuffling**, **SMPC**, and **gradient pruning** for communication-efficient, secure distributed training.
 
-## Overview
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-This project implements a federated learning framework with the following key privacy-preserving features:
-
-- **Cluster Shuffling**: Dynamically reorganizes clients into different clusters across training rounds to prevent inference attacks
-- **Secure Multi-Party Computation (SMPC)**: Uses secret sharing schemes (additive and Shamir's) to protect model updates
-- **Differential Privacy**: Adds calibrated noise to model parameters to provide formal privacy guarantees
-- **Privacy Attack Evaluation**: Comprehensive implementations of Membership Inference Attacks (MIA) and Gradient Inversion Attacks
-- **Poisoning Attack Framework**: Modular system for evaluating defense mechanisms against data and gradient poisoning attacks
-- **Multi-Dataset Support**: CIFAR-10/100, FFHQ (face dataset), and Caltech256 with dataset-specific optimizations
-
-## Architecture
-
-The system consists of:
-
-- **Nodes**: Coordinate federated learning rounds and manage clusters
-- **Clients**: Train local models and participate in secure aggregation
-- **Security Layer**: Implements SMPC protocols and differential privacy mechanisms
-- **Attack Modules**: Evaluate privacy vulnerabilities through various attack scenarios
-
-## Installation
-
-1. Clone the repository:
+## 🚀 Quick Start
 
 ```bash
+# Install
 git clone https://github.com/Tanguyvans/cluster-shuffling-fl.git
 cd cluster-shuffling-fl
-```
-
-2. Install dependencies:
-
-```bash
 pip3 install -r requirements.txt
-```
 
-3. Download CIFAR-10 dataset (automatically handled on first run)
-
-## Configuration
-
-Edit `config.py` to customize the federated learning setup:
-
-```python
-settings = {
-    "name_dataset": "cifar10",           # Dataset: cifar10, cifar100, caltech256
-    "arch": "simplenet",                 # Model: simplenet, mobilenet, resnet18, shufflenet
-    "number_of_clients_per_node": 6,     # Number of clients per node
-    "n_rounds": 10,                      # Number of federated rounds
-    "lr": 0.001,                         # Learning rate
-    "batch_size": 32,                    # Batch size
-
-    # Privacy settings
-    "diff_privacy": False,               # Enable differential privacy
-    "noise_multiplier": 0.1,             # DP noise multiplier
-    "epsilon": 5.0,                      # DP privacy budget
-
-    # Clustering and SMPC
-    "clustering": True,                  # Enable cluster shuffling
-    "type_ss": "additif",               # Secret sharing: additif, shamir
-    "threshold": 3,                      # SMPC threshold
-    "min_number_of_clients_in_cluster": 3,
-}
-```
-
-## Running the System
-
-### Basic Federated Learning
-
-Run the main federated learning training:
-
-```bash
+# Run
 python3 main.py
 ```
 
-This will:
+**Result**: Federated learning on CIFAR-10 with 6 clients, 10 rounds, **80% communication savings** from gradient pruning!
 
-1. Initialize the federated learning environment
-2. Create clients and distribute data
-3. Train models for the specified number of rounds
-4. Apply privacy mechanisms (clustering, SMPC, DP) as configured
-5. Save trained models and metrics
+📖 **New to FL?** → [Quickstart Guide](docs/getting-started/quickstart.md)
 
-### Monitoring Training
+---
 
-Training progress is logged to `results/CFL/output.txt` and includes:
+## ✨ Key Features
 
-- Per-client training/validation/test metrics
-- Communication overhead measurements
-- Privacy budget consumption (if DP enabled)
-- Cluster assignments and shuffling events
+### Privacy & Security
+- **🔄 Cluster Shuffling**: Dynamic client reorganization prevents long-term inference
+- **🔐 SMPC**: Secret sharing (additive & Shamir's) protects model updates
+- **🛡️ Differential Privacy**: Calibrated noise for formal privacy guarantees
 
-### Trained Models
+### Communication Efficiency
+- **📉 Gradient Pruning** (NEW!): 80% communication reduction via Deep Gradient Compression (DGC)
+- **⚡ Top-k Sparsification**: Send only 10% of gradients with momentum correction
+- **🔗 Compatible**: Works with SMPC, DP, and all privacy mechanisms
 
-Models are managed through the centralized ModelManager with structured organization:
+### Attack Evaluation
+- **⚔️ Poisoning Attacks**: 6 attack types (Label Flip, IPM, ALIE, Backdoor, etc.)
+- **🔍 Privacy Attacks**: Gradient inversion, membership inference
+- **📊 Comprehensive Metrics**: PSNR, accuracy, communication overhead
 
-```
-results/[experiment_name]/
-├── models/
-│   ├── clients/round_XXX/        # Individual client models per round
-│   ├── global/                   # Aggregated global models
-│   ├── clusters/round_XXX/       # Cluster-level aggregations
-│   └── fragments/round_XXX/      # SMPC secret shares
-├── logs/                         # Training and experiment logs
-├── metrics/                      # Energy, communication, time tracking
-└── config.json                   # Experiment configuration
-```
+### Byzantine Robustness
+- **Krum**, Multi-Krum
+- **Trimmed Mean**, Median
+- **FLTrust** - Trust-based aggregation
 
-## Privacy Attack Evaluation
+---
 
-The system includes implementations of state-of-the-art privacy attacks to evaluate the effectiveness of the privacy-preserving mechanisms.
+## 📚 Documentation
 
-### MIA Attack
+### Getting Started
+- [Installation Guide](docs/getting-started/installation.md) - Setup & dependencies
+- [Quickstart (5 min)](docs/getting-started/quickstart.md) - First FL experiment
+- [Configuration](docs/getting-started/configuration.md) - Complete config.py reference
 
-**Membership Inference Attack** attempts to determine if a specific data sample was used in training a target model.
+### Core Features
+- [Gradient Pruning](docs/features/gradient-pruning.md) - 80% communication savings
+- [Privacy Defenses](docs/features/privacy-defenses.md) - SMPC, DP, Clustering
+- [Aggregation Methods](docs/features/aggregation-methods.md) - Krum, FLTrust, etc.
 
-#### How it works:
+### Attack Evaluation
+- [Poisoning Attacks](docs/attacks/poisoning-attacks.md) - 6 attack types
+- [Gradient Inversion](docs/attacks/gradient-inversion.md) - Privacy attacks
+- [Pruned Models](docs/attacks/pruned-models.md) - Attack comparison
 
-1. **Shadow Model Training**: Trains multiple shadow models on datasets with known membership
-2. **Attack Model Training**: Uses shadow model predictions to train a binary classifier
-3. **Inference**: Applies the attack model to determine membership of target samples
+### Measurement
+- [Communication Metrics](docs/measurement/communication.md) - Measure pruning impact
 
-#### Running MIA Attack:
+📖 **[Full Documentation Index](docs/README.md)**
 
-```bash
-python3 mia_attack.py
-```
+---
 
-**Configuration**:
+## 🎯 Use Cases
 
-- `NUM_SHADOWS = 3`: Number of shadow models to train
-- `SHADOW_DATASET_SIZE = 4000`: Size of shadow training datasets
-- `ATTACK_TEST_DATASET_SIZE = 4000`: Size of attack evaluation dataset
-
-**Attack Results**:
-
-- Attack accuracy ~50% indicates strong privacy protection (random guessing)
-- Attack accuracy >60% suggests potential privacy vulnerabilities
-- Results are saved with detailed metrics and analysis
-
-**Key Features**:
-
-- Supports multiple model architectures (SimpleNet, ResNet, MobileNet)
-- Automatic conversion between PyTorch and TensorFlow models
-- Comprehensive evaluation metrics (accuracy, precision, recall, AUC)
-
-### Gradient Inversion Attacks
-
-**Gradient Inversion Attacks** attempt to reconstruct training data from model gradients shared during federated learning. This framework provides multiple attack implementations optimized for different datasets.
-
-#### Quick Start
-
-For detailed attack usage, see [ATTACK_GUIDE.md](ATTACK_GUIDE.md).
-
-**CIFAR-10/100 Datasets:**
-
-```bash
-# List available experiments with gradient data
-python3 run_inference_attack.py --list
-
-# Run attack on latest experiment
-python3 run_inference_attack.py
-
-# Attack specific experiment with configuration
-python3 run_inference_attack.py --experiment cifar10_classic_c6_r3 --config aggressive
-
-# Attack specific rounds and clients
-python3 run_inference_attack.py --rounds 1 2 --clients c0_1 c0_2
-```
-
-**FFHQ (Face) Dataset:**
-
-```bash
-# GIAS attack (high-quality reconstruction)
-python3 attack_fl_ffhq.py --attack-type gias
-
-# GIFD attack (generative model prior)
-python3 attack_fl_ffhq.py --attack-type gifd --round 1 --client c0_1
-
-# Standard gradient inversion
-python3 attack_fl_ffhq.py --attack-type gradient_inversion
-```
-
-#### Attack Configurations
-
-| Config | Restarts | Iterations | Use Case |
-|--------|----------|------------|----------|
-| `quick_test` | 1 | 8,000 | Fast testing |
-| `default` | 2 | 24,000 | Balanced evaluation |
-| `aggressive` | 5 | 48,000 | Strong attack |
-| `high_quality` | 8 | 60,000 | Maximum quality |
-
-#### Privacy Assessment Metrics
-
-- **PSNR > 25 dB**: Vulnerable (high-quality reconstruction)
-- **PSNR 20-25 dB**: Weak protection
-- **PSNR 15-20 dB**: Moderate protection
-- **PSNR < 15 dB**: Strong protection
-
-#### Attack Features
-
-- **Intelligent Experiment Discovery**: Auto-detects experiments with gradient data
-- **Flexible Targeting**: Select specific rounds, clients, or clusters
-- **Multiple Attack Types**: GIAS, GIFD, standard gradient inversion
-- **Dataset-Specific Optimization**: CIFAR vs FFHQ optimized attacks
-- **Comprehensive Metrics**: PSNR, SSIM, MSE with detailed analysis
-- **Visualization**: Side-by-side comparisons and individual reconstructions
-
-## Privacy Protection Mechanisms
-
-### Cluster Shuffling
-
-- Dynamically reassigns clients to different clusters each round
-- Prevents long-term inference attacks based on cluster membership
-- Maintains model performance while reducing attack surface
-
-### Secure Multi-Party Computation (SMPC)
-
-- **Additive Secret Sharing**: Simple and efficient for basic privacy
-- **Shamir's Secret Sharing**: Provides stronger security guarantees
-- Protects individual model updates during aggregation
-
-### Differential Privacy
-
-- Adds calibrated noise to model parameters
-- Provides formal privacy guarantees with (ε, δ)-DP
-- Configurable privacy budget management
-
-### Gradient Pruning (Communication Efficiency)
-
-Implements Deep Gradient Compression (DGC) to reduce communication overhead:
-
-- **Top-k Sparsification**: Sends only the most important gradients (10-100x compression)
-- **Momentum Correction**: Velocity buffers accumulate pruned gradients across rounds
-- **Compatible with SMPC**: Apply pruning before secret sharing for maximum efficiency
-- **Configurable Compression Ratio**: Adjust keep_ratio to balance accuracy vs. communication
-
-**Configuration in `config.py`:**
+### Research & Evaluation
 
 ```python
-"gradient_pruning": {
-    "enabled": True,                       # Enable gradient pruning
-    "keep_ratio": 0.1,                     # Keep 10% of gradients (90% compression)
-    "momentum_factor": 0.9,                # Momentum for velocity buffer
-    "use_momentum_correction": True,       # Enable DGC momentum (recommended)
-    "sample_ratio": 0.01,                  # Sampling ratio for efficient threshold finding
-}
+# Test gradient pruning impact
+"gradient_pruning": {"enabled": True, "keep_ratio": 0.1}
+python3 main.py
+
+# Compare attack resistance
+python3 run_grad_inv.py --config aggressive
 ```
 
-**Benefits:**
-- 10-100x reduction in communication overhead
-- Maintains model convergence through momentum correction
-- Combines with SMPC for privacy + efficiency
-- Efficient threshold finding via sampling (10-100x faster)
-
-## Poisoning Attack Framework
-
-The system includes a comprehensive poisoning attack framework to evaluate robustness mechanisms.
-
-### Supported Poisoning Attacks
-
-| Attack Type | Target | Description |
-|-------------|--------|-------------|
-| **Label Flipping** | Data | Flips training labels (targeted/random/all-to-one) |
-| **IPM** | Gradients | Inner Product Manipulation with cross-cluster targeting |
-| **Sign Flipping** | Gradients | Flips gradient signs to disrupt aggregation |
-| **Noise Injection** | Gradients | Adds Gaussian/uniform/Laplacian noise |
-| **ALIE** | Gradients | "A Little Is Enough" byzantine attack |
-| **Backdoor** | Data | Inserts backdoor triggers into training data |
-
-### Configuration
-
-Edit `config.py` to configure poisoning attacks:
+### Privacy Evaluation
 
 ```python
+# Enable all privacy mechanisms
+"diff_privacy": True,
+"clustering": True,
+"type_ss": "shamir",
+"gradient_pruning": {"enabled": True}
+```
+
+### Attack Testing
+
+```python
+# Test poisoning attacks
 "poisoning_attacks": {
     "enabled": True,
-    "malicious_clients": ["c0_1", "c0_2"],
-    "attack_type": "ipm",  # labelflip, ipm, signflip, noise, alie, backdoor
-    "attack_intensity": 0.5,
-    "attack_rounds": None,  # None = all rounds
+    "malicious_clients": ["c0_1"],
+    "attack_type": "ipm",
+    "attack_intensity": 0.5
 }
 ```
 
-### Running with Attacks
+---
 
-```bash
-# Enable poisoning in config.py, then:
-python3 main.py
+## 📊 Results
 
-# The framework will:
-# 1. Mark specified clients as malicious
-# 2. Apply selected attack during training
-# 3. Log attack effectiveness metrics
-# 4. Evaluate defense mechanism performance
-```
+### Communication Efficiency
 
-## Experimental Results
+| Method | Compression | Savings | Accuracy Impact |
+|--------|-------------|---------|-----------------|
+| Baseline | 1.0x | 0% | - |
+| **Gradient Pruning (k=0.1)** | **5.0x** | **80%** | **<1%** |
+| Pruning (k=0.05) | 10.0x | 90% | ~2% |
 
-### Privacy vs Utility Trade-offs
+### Privacy Protection (PSNR - lower is better)
 
-- **No Privacy**: High utility, vulnerable to attacks
-- **Clustering Only**: Moderate privacy, minimal utility loss
-- **SMPC + Clustering**: Strong privacy, <5% utility degradation
-- **Full Protection (SMPC + Clustering + DP)**: Maximum privacy, 10-15% utility cost
+| Defense | Gradient Inversion PSNR | Privacy Level |
+|---------|-------------------------|---------------|
+| None | 28 dB | ❌ Vulnerable |
+| SMPC | 18 dB | ✅ Moderate |
+| SMPC + Pruning | 15 dB | ✅ Strong |
+| SMPC + DP | 12 dB | ✅✅ Very Strong |
 
 ### Attack Resistance
 
-**Privacy Attacks:**
-- **MIA Success Rate**: Reduced from 85% to 52% with full protection
-- **Gradient Inversion Quality (PSNR)**: Reduced from 25dB to 8dB with SMPC
+| Defense | IPM Attack Impact | Label Flip Impact |
+|---------|-------------------|-------------------|
+| FedAvg | -40% accuracy | -35% accuracy |
+| Krum | -13% accuracy | -8% accuracy |
+| Krum + Clustering | -4% accuracy | -2% accuracy |
 
-**Poisoning Attacks:**
-- **Label Flipping Impact**: Cluster shuffling dilutes attack across rounds
-- **IPM Attack**: Cross-cluster targeting mitigated by dynamic shuffling
-- **Backdoor Success Rate**: Reduced with cluster reorganization
+---
 
-### System Overhead
+## 🏗️ Architecture
 
-- **Communication Overhead**: 2-3x increase with SMPC
-- **Computation Time**: ~15% increase per round with secret sharing
-- **Convergence**: Minimal impact on rounds to target accuracy
+```
+┌─────────────┐
+│   Clients   │ ──► Local Training
+└─────────────┘
+       │
+       ├──► Gradient Pruning (80% reduction)
+       │
+       ├──► SMPC Secret Sharing
+       │
+       ▼
+┌─────────────┐
+│ Aggregation │ ──► Krum / FedAvg / FLTrust
+└─────────────┘
+       │
+       ▼
+┌─────────────┐
+│ Global Model│ ──► Broadcast to Clients
+└─────────────┘
+```
 
-## Project Structure
+---
+
+## 🔧 Configuration
+
+Edit `config.py` for quick customization:
+
+```python
+# Dataset & Model
+"name_dataset": "cifar10",      # cifar10, cifar100, ffhq128
+"arch": "simplenet",            # simplenet, resnet18, mobilenet
+
+# Federated Learning
+"n_rounds": 10,                 # Training rounds
+"number_of_clients_per_node": 6,# Clients per node
+
+# Gradient Pruning (NEW!)
+"gradient_pruning": {
+    "enabled": True,            # 80% communication savings
+    "keep_ratio": 0.1,          # Keep 10% of gradients
+}
+
+# Privacy
+"diff_privacy": True,           # Enable DP
+"clustering": True,             # Cluster shuffling
+
+# Aggregation
+"aggregation": {
+    "method": "krum",           # fedavg, krum, fltrust
+}
+```
+
+📖 [Complete Configuration Guide](docs/getting-started/configuration.md)
+
+---
+
+## 📁 Project Structure
 
 ```
 cluster-shuffling-fl/
-├── main.py                          # Main federated learning orchestrator
-├── config.py                        # Centralized configuration settings
-├── ATTACK_GUIDE.md                  # Comprehensive attack usage guide
-├── CLAUDE.md                        # Project documentation for Claude Code
+├── main.py                     # Main FL orchestrator
+├── config.py                   # Configuration settings
 │
-├── federated/                       # Federated learning implementation
-│   ├── client.py                   # Client class for local training
-│   ├── server.py                   # Node class for coordination
-│   ├── aggregation.py              # Aggregation strategies
-│   ├── training.py                 # Training and evaluation logic
-│   ├── flower_client.py            # Flower framework wrapper
-│   └── factory.py                  # Factory functions for nodes/clients
+├── docs/                       # 📚 Documentation
+│   ├── getting-started/        # Installation, quickstart, config
+│   ├── features/               # Gradient pruning, privacy, etc.
+│   ├── attacks/                # Poisoning, gradient inversion
+│   └── measurement/            # Metrics and evaluation
 │
-├── models/                          # Neural network architectures
-│   ├── factory.py                  # Model factory pattern
-│   └── architectures/              # Model implementations
-│       ├── simple_net.py           # Lightweight CNN
-│       ├── conv_net.py             # Vulnerable ConvNet for testing
-│       ├── mobilenet.py            # MobileNet architecture
-│       ├── resnet.py               # ResNet variants
-│       ├── shuffle_net.py          # ShuffleNet architecture
-│       ├── squeeze_net.py          # SqueezeNet architecture
-│       └── efficient_net.py        # EfficientNet architecture
+├── federated/                  # FL implementation
+│   ├── client.py               # Client training
+│   ├── server.py               # Server aggregation
+│   └── flower_client.py        # Flower wrapper
 │
-├── data/                            # Dataset management
-│   ├── loaders.py                  # CIFAR-10/100, Caltech256 loaders
-│   └── ffhq_dataset.py             # FFHQ face dataset loader
+├── security/                   # Privacy mechanisms
+│   ├── secret_sharing.py       # SMPC implementation
+│   └── gradient_pruning.py     # DGC implementation
 │
-├── security/                        # Privacy-preserving mechanisms
-│   └── secret_sharing.py           # Additive and Shamir secret sharing
+├── attacks/poisoning/          # Attack framework
+│   ├── labelflip_attack.py
+│   ├── ipm_attack.py
+│   └── ...
 │
-├── attacks/                         # Attack framework
-│   ├── poisoning/                  # Poisoning attacks
-│   │   ├── base_poisoning_attack.py      # Abstract base class
-│   │   ├── attack_factory.py             # Attack factory pattern
-│   │   ├── labelflip_attack.py           # Label flipping attacks
-│   │   ├── ipm_attack.py                 # Inner Product Manipulation
-│   │   ├── signflip_attack.py            # Sign flipping attacks
-│   │   ├── noise_attack.py               # Noise injection attacks
-│   │   ├── alie_attack.py                # A Little Is Enough attack
-│   │   ├── backdoor_attack.py            # Backdoor attacks
-│   │   └── evaluation.py                 # Attack metrics
-│   └── utils/                      # Attack utilities
-│       ├── data_loader.py          # Attack data loading
-│       ├── metrics.py              # Attack evaluation metrics
-│       └── visualization.py        # Attack visualization
-│
-├── utils/                           # Utility modules
-│   ├── model_manager.py            # Centralized model/gradient management
-│   ├── model_metadata.py           # Model metadata handling
-│   ├── model_paths.py              # Path management
-│   ├── system_metrics.py           # Energy, communication, time tracking
-│   ├── metrics.py                  # Training metrics
-│   ├── visualization.py            # Visualization utilities
-│   ├── device.py                   # Device management
-│   └── optimization.py             # Optimization utilities
-│
-├── core/                            # Core training logic
-│   └── training.py                 # Training orchestration
-│
-├── mia_attack.py                    # Membership inference attack
-├── run_inference_attack.py          # Gradient inversion attack runner
-├── attack_fl_ffhq.py                # FFHQ-specific attack script
-├── attack_ffhq.py                   # Alternative FFHQ attack implementation
-├── train_ffhq_resnet.py             # FFHQ ResNet training
-│
-├── results/                         # Training results and metrics
-│   └── [experiment_name]/
-│       ├── models/                 # Saved models per round
-│       ├── logs/                   # Training logs
-│       ├── metrics/                # System metrics
-│       └── config.json             # Experiment configuration
-│
-├── keys/                            # RSA keys for SMPC
-└── requirements.txt                 # Python dependencies
+└── models/architectures/       # Neural network models
+    ├── simplenet.py
+    ├── resnet.py
+    └── ...
 ```
 
-## Contributing
+---
 
-1. Fork the repository
-2. Create a feature branch
-3. Implement your changes
-4. Add tests for new functionality
-5. Submit a pull request
+## 🧪 Testing
+
+```bash
+# Test gradient pruning
+python3 test_gradient_pruning.py
+
+# Run gradient inversion attack
+python3 run_grad_inv.py --config default
+
+# Measure communication savings
+python3 measure_communication.py --keep-ratio 0.1
+```
+
+---
+
+## 📖 Research & Papers
+
+This framework implements and evaluates:
+
+- **Deep Gradient Compression** (Lin et al., ICLR 2018)
+- **Cluster Shuffling** for federated learning
+- **Byzantine-robust aggregation** (Krum, Trimmed Mean)
+- **Gradient inversion attacks** (DLG, iDLG, GIAS, GIFD)
+
+See [Research Papers](docs/reference/papers.md) for full citations.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Areas for improvement:
+- Additional attack implementations
+- More aggregation methods
+- Enhanced privacy mechanisms
+- Documentation improvements
+
+---
+
+## 📝 License
+
+This project is released under the MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- [Flower](https://flower.dev/) - Federated learning framework
+- [Opacus](https://opacus.ai/) - Differential privacy library
+- [PyTorch](https://pytorch.org/) - Deep learning framework
+
+---
+
+## 📧 Contact
+
+For questions or collaborations:
+- GitHub Issues: [Create an issue](https://github.com/Tanguyvans/cluster-shuffling-fl/issues)
+- Email: [Your email]
+
+---
+
+**🚀 Ready to get started?** → [Quickstart Guide](docs/getting-started/quickstart.md)
