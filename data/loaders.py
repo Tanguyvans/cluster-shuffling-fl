@@ -15,6 +15,8 @@ NORMALIZE_DICT = {
     'caltech256': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     'ffhq': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),  # ImageNet normalization (matching train_ffhq_resnet.py)
     'ffhq128': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),  # ImageNet normalization (matching train_ffhq_resnet.py)
+    'imagenette': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),  # ImageNet normalization (10-class ImageNet subset)
+    'imagenette160': dict(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),  # 160x160 version
 }
 
 

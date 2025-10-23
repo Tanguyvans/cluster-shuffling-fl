@@ -3,6 +3,7 @@ import pickle
 import time
 import os
 import torch
+import numpy as np
 from sklearn.model_selection import train_test_split
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -165,12 +166,26 @@ class Client:
         
         test_metrics = self.flower_client.evaluate(res, {'name': f'Client {self.id}'})
         
+        # Build output line with optional pruning information
+        output_line = (
+            f"client {self.id}: data:{metrics['len_train']} "
+            f"train: {metrics['len_train']} train: {metrics['train_loss']} {metrics['train_acc']} "
+            f"val: {metrics['val_loss']} {metrics['val_acc']} "
+            f"test: {test_metrics['test_loss']} {test_metrics['test_acc']}"
+        )
+
+        # Add pruning stats if available
+        if 'pruning_stats' in metrics:
+            ps = metrics['pruning_stats']
+            output_line += (
+                f" | pruning: {ps.get('compression_factor', 1.0):.1f}x compression, "
+                f"{ps.get('communication_savings', 0.0)*100:.1f}% saved"
+            )
+
+        output_line += "\n"
+
         with open(self.save_results + "output.txt", "a") as fi:
-            fi.write(
-                f"client {self.id}: data:{metrics['len_train']} "
-                f"train: {metrics['len_train']} train: {metrics['train_loss']} {metrics['train_acc']} "
-                f"val: {metrics['val_loss']} {metrics['val_acc']} "
-                f"test: {test_metrics['test_loss']} {test_metrics['test_acc']}\n")
+            fi.write(output_line)
         
         # Store comprehensive training metrics for ModelManager
         self.last_train_loss = metrics.get('train_loss', 0.0)
@@ -179,8 +194,23 @@ class Client:
         self.last_val_acc = metrics.get('val_acc', None)
         self.last_loss = test_metrics['test_loss']
         self.last_accuracy = test_metrics['test_acc']
-        
-        # Always return the raw weights from training. 
+
+        # Record gradient pruning statistics if available
+        if self.metrics_tracker and 'pruning_stats' in metrics:
+            round_num = config.get('round_number', 0)
+            self.metrics_tracker.record_pruning(
+                round_num=round_num,
+                client_id=self.id,
+                pruning_stats=metrics['pruning_stats']
+            )
+
+        # Store pruned parameters if pruning was applied
+        if 'pruning_stats' in metrics:
+            self.last_pruned_parameters = res  # Store pruned weights for saving
+        else:
+            self.last_pruned_parameters = None
+
+        # Always return the raw weights from training.
         # SMPC will be handled by the train_client function if clustering is enabled.
         print(f"[Client {self.id}] Training complete. Returning {'poisoned' if self.is_malicious else 'clean'} weights.")
         return res
@@ -322,10 +352,57 @@ class Client:
             )
         self.connections[client_id] = {"address": ("127.0.0.1", address), "public_key": public_key}
 
+    def save_pruned_model(self, round_num, pruned_weights, experiment_config=None):
+        """
+        Save pruned model separately for attack comparison
+
+        Args:
+            round_num: Current training round number
+            pruned_weights: Pruned model weights (sparse)
+            experiment_config: Experiment configuration for metadata
+        """
+        if not self.model_manager:
+            print(f"[Client {self.id}] ERROR: No ModelManager available. Cannot save pruned model.")
+            return
+
+        # Convert pruned weights to state dict format
+        pruned_state = {}
+        if isinstance(pruned_weights, list):
+            for i, weight in enumerate(pruned_weights):
+                if isinstance(weight, np.ndarray):
+                    pruned_state[f'layer_{i}'] = torch.from_numpy(weight)
+                else:
+                    pruned_state[f'layer_{i}'] = weight
+
+        # Create pruned models directory
+        pruned_dir = os.path.join(self.model_manager.base_dir, 'models', 'pruned', f'round_{round_num:03d}')
+        os.makedirs(pruned_dir, exist_ok=True)
+
+        # Save pruned model
+        pruned_path = os.path.join(pruned_dir, f'{self.id}_pruned_model.pt')
+
+        pruned_data = {
+            'round': round_num,
+            'client_id': self.id,
+            'model_state': pruned_state,
+            'timestamp': time.time(),
+            'experiment_name': self.model_manager.experiment_name,
+            'is_pruned': True,
+            'sparsity': sum(np.count_nonzero(w == 0) for w in pruned_weights if isinstance(w, np.ndarray)) / sum(w.size for w in pruned_weights if isinstance(w, np.ndarray))
+        }
+
+        if experiment_config:
+            pruned_data['experiment_config'] = experiment_config
+
+        torch.save(pruned_data, pruned_path)
+        print(f"[Client {self.id}] Saved pruned model to {pruned_path}")
+
+        return pruned_path
+
     def save_client_model(self, round_num, model_weights=None, save_gradients=False, experiment_config=None):
         """
         Save client model and optionally gradients using ModelManager
-        
+
         Args:
             round_num: Current training round number
             model_weights: Model weights to save (if None, gets from flower_client)

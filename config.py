@@ -13,56 +13,65 @@ DATASET_PATHS = {
 }
 
 settings = {
-    "name_dataset": "ffhq128",  # "cifar10", "cifar100", "ffhq128" (use ffhq128 for GIFD GAN attacks)
+    "name_dataset": "cifar10",  # "cifar10", "cifar100", "ffhq128", "caltech256"
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "resnet18",  # ResNet18 matching train_ffhq_resnet.py
-    "pretrained": False,  # Don't use ImageNet pretrained weights (train from scratch like train_ffhq_resnet.py)
-    "input_size": 32,  # 32x32 input size to match train_ffhq_resnet.py and GIAS core
+    "arch": "simplenet",        # simplenet, mobilenet, resnet18, shufflenet, squeezenet, efficientnet
+    "pretrained": False,        # Use pretrained weights
+    "input_size": 32,           # Input size (32 for CIFAR, 128 for FFHQ)
     "patience": 3,
-    "batch_size": 1,  # Batch size of 1 to match train_ffhq_resnet.py
-    "n_epochs": 1,     # Single epoch like train_ffhq_resnet.py
-    "num_classes": 6,  # 6 age groups matching train_ffhq_resnet.py (0-10, 10-20, 20-30, 30-40, 40-50, 50+)
+    "batch_size": 32,           # Normal batch size for training
+    "n_epochs": 5,              # Multiple epochs for proper training
+    "num_classes": 10,          # 10 classes for CIFAR-10
 
-    # Single batch training for inference attacks - MATCHING train_ffhq_resnet.py
-    "single_batch_training": True,   # Train on only one batch per epoch
-    "balanced_class_training": True, # Ensure each client gets balanced samples
-    "max_samples_per_client": 1,     # Exactly 1 sample per client (matching train_ffhq_resnet.py)
+    # Normal training settings
+    "single_batch_training": False,   # Use full dataset
+    "balanced_class_training": False, # Normal data distribution
+    "max_samples_per_client": None,   # No limit on samples
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
     "min_number_of_clients_in_cluster": 3,
 
     "check_usefulness": False,
-    "coef_useful": 1.05,   # 1.05
+    "coef_useful": 1.05,
     "tolerance_ceil": 0.08,
 
-    "n_rounds": 3,  # Fewer rounds for focused gradient attack evaluation
+    "n_rounds": 10,             # Normal number of rounds
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
-    "lr": 0.001,               # Learning rate matching train_ffhq_resnet.py
-    "weight_decay": 1e-4,      # Weight decay matching train_ffhq_resnet.py
+    "lr": 0.001,
+    "weight_decay": 1e-4,
     "choice_scheduler": "StepLR",
-    "step_size": 2,            # Step size matching train_ffhq_resnet.py
-    "gamma": 0.1,              # Gamma matching train_ffhq_resnet.py
+    "step_size": 5,
+    "gamma": 0.1,
 
-    "diff_privacy": False,
-    "noise_multiplier": 0.1,  
-    "max_grad_norm": 0.5,     
+    "diff_privacy": False,      # Disable DP for baseline
+    "noise_multiplier": 0.1,
+    "max_grad_norm": 0.5,
     "delta": 1e-5,
-    "epsilon": 5.0,           
+    "epsilon": 5.0,
 
-    "clustering": False,       # Testing Krum without SMPC first
+    "clustering": False,        # Disable clustering for baseline
     "type_ss": "additif",
     "threshold": 3,
     "m": 3,
-    "ts": 5,                  
+    "ts": 5,
 
-    # New settings for PyTorch-based SMPC and gradient saving
-    "save_gradients": True,                    # Enable gradient saving for attacks
-    "save_gradients_rounds": [1, 2, 3],       # Which rounds to save gradients (all rounds for small dataset)
+    # Gradient saving disabled for normal training
+    "save_gradients": False,                  # Disable gradient saving
+    "save_gradients_rounds": [],              # No rounds to save
     "use_pytorch_smpc": True,                  # Use pure PyTorch SMPC (no NumPy)
     "aggregation_method": "weights",         # "weights" or "gradients" - what to use for SMPC/aggregation
                                                # "gradients": More private, smaller data, better for attacks
                                                # "weights": Traditional FL, larger data, current implementation
+
+    # Gradient pruning/compression (Deep Gradient Compression)
+    "gradient_pruning": {
+        "enabled": True,                       # Enable gradient pruning for communication efficiency
+        "keep_ratio": 0.1,                     # Fraction of gradients to keep (0.1 = 10%, 90% compression)
+        "momentum_factor": 0.9,                # Momentum for velocity buffer (standard: 0.9)
+        "use_momentum_correction": True,       # Enable DGC momentum correction (recommended)
+        "sample_ratio": 0.01,                  # Sampling ratio for threshold estimation (1%)
+    },
     
     "save_figure": True,
     "matrix_path": "results/CFL/matrix_path",
@@ -70,23 +79,23 @@ settings = {
     
     # Aggregation method configuration
     "aggregation": {
-        "method": "krum",  # Options: fedavg, krum, multi_krum, trimmed_mean, median, fltrust
+        "method": "fedavg",  # Options: fedavg, krum, multi_krum, trimmed_mean, median, fltrust
         "krum_malicious": 1,  # Number of malicious clients to tolerate (for krum)
         "multi_krum_keep": 3,  # Number of clients to keep (for multi_krum)
         "trim_ratio": 0.2,  # Fraction to trim (for trimmed_mean)
-        "fltrust_root_size": 5000,  # Size of server's root dataset for FLTrust (increased)
+        "fltrust_root_size": 5000,  # Size of server's root dataset for FLTrust
         "fltrust_learning_rate": 0.01,  # Learning rate for FLTrust server model
         "fltrust_server_epochs": 5,  # Number of epochs for server training
     },
-    
+
     # Poisoning attack configuration
     "poisoning_attacks": {
-        "enabled": False,                            # Enable poisoning attacks
-        "malicious_clients": ["c0_1"],              # List of malicious client IDs (e.g., ["c0_1", "c0_2"])
-        "attack_type": "noise",                # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
-        "attack_intensity": 1.0,                   # Attack strength (0.0 to 1.0)
-        "attack_rounds": None,                     # Specific rounds to attack (None = all rounds)
-        "attack_frequency": 1.0,                   # Probability of attacking each round
+        "enabled": False,                        # Disable attacks for normal training
+        "malicious_clients": [],                 # No malicious clients
+        "attack_type": "noise",                  # Attack type: labelflip, noise, signflip, alie, ipm, backdoor
+        "attack_intensity": 0.0,                 # No attack intensity
+        "attack_rounds": None,                   # Specific rounds to attack (None = all rounds)
+        "attack_frequency": 0.0,                 # No attacks
         
         # Attack-specific configurations
         "labelflip_config": {

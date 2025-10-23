@@ -15,6 +15,7 @@ from utils.visualization import save_graphs, save_matrix, save_roc
 from utils.model_utils import get_parameters, set_parameters
 from core.training import train, test
 from security.secret_sharing import apply_smpc, sum_shares
+from security.gradient_pruning import GradientPruner
 
 import os
 
@@ -60,6 +61,21 @@ class FlowerClient(fl.client.NumPyClient):
         self.list_shapes = None
         self.frag_weights = []
         self.connections = {}
+
+        # Gradient pruning configuration
+        pruning_config = settings.get('gradient_pruning', {})
+        self.gradient_pruning_enabled = pruning_config.get('enabled', False)
+        if self.gradient_pruning_enabled:
+            self.gradient_pruner = GradientPruner(
+                keep_ratio=pruning_config.get('keep_ratio', 0.1),
+                momentum_factor=pruning_config.get('momentum_factor', 0.9),
+                use_momentum_correction=pruning_config.get('use_momentum_correction', True),
+                sample_ratio=pruning_config.get('sample_ratio', 0.01)
+            )
+            print(f"FlowerClient: Gradient Pruning ENABLED (keep_ratio={pruning_config.get('keep_ratio', 0.1)})")
+        else:
+            self.gradient_pruner = None
+            print(f"FlowerClient: Gradient Pruning DISABLED")
 
         # Initialize model with provided input size
         model = Net(num_classes=len(self.classes), arch=self.model_choice, pretrained=pretrained, input_size=input_size)
@@ -215,14 +231,29 @@ class FlowerClient(fl.client.NumPyClient):
         if self.save_figure:
             save_graphs(self.save_figure, self.epochs, results)
 
+        # Apply gradient pruning BEFORE SMPC (if enabled)
+        # This reduces communication overhead by 10-100x
+        if self.gradient_pruning_enabled and self.gradient_pruner is not None:
+            pruned_params, pruning_stats = self.gradient_pruner.prune_weights(best_parameters)
+            print(f"[GradientPruning] Client {node_id}: "
+                  f"Compression {pruning_stats['compression_factor']:.1f}x, "
+                  f"Kept {pruning_stats['kept_parameters']:,}/{pruning_stats['total_parameters']:,} params, "
+                  f"Saved {pruning_stats['communication_savings']:.1%} communication")
+
+            # Use pruned parameters for subsequent operations
+            best_parameters = pruned_params
+
+            # Add pruning stats to results
+            results['pruning_stats'] = pruning_stats
+
         # Apply SMPC if we have connections (clustering is active)
         if self.connections:
-            encrypted_lists, self.list_shapes = apply_smpc(best_parameters, len(self.connections) + 1, 
+            encrypted_lists, self.list_shapes = apply_smpc(best_parameters, len(self.connections) + 1,
                                                          self.type_ss, self.threshold)
             # Keep the last share for this client
             self.frag_weights.append(encrypted_lists.pop())
             return encrypted_lists, {'len_train': self.len_train, **results}
-        
+
         return best_parameters, {'len_train': self.len_train, **results}
 
     def evaluate(self, parameters, config):

@@ -53,6 +53,9 @@ python3 main.py
 
 # Test different attack scenarios
 python3 test_attacks.py  # Comprehensive attack testing script
+
+# Test gradient pruning integration
+python3 test_gradient_pruning.py  # Verify gradient pruning works correctly
 ```
 
 ### Configuration
@@ -68,6 +71,27 @@ All settings are centralized in `config.py`. Modify this file rather than using 
 - `balanced_class_training`: True/False (ensure one sample per class for vulnerability testing)
 - `save_gradients`: True/False (enable gradient saving for attack evaluation)
 - `aggregation_method`: "weights" or "gradients" (SMPC aggregation method)
+- `gradient_pruning`: Configuration for Deep Gradient Compression (see [GRADIENT_PRUNING_GUIDE.md](GRADIENT_PRUNING_GUIDE.md))
+
+### Gradient Pruning Configuration
+
+Enable communication-efficient federated learning with Deep Gradient Compression:
+
+```python
+"gradient_pruning": {
+    "enabled": True,                       # Enable gradient pruning
+    "keep_ratio": 0.1,                     # Keep 10% of gradients (10x compression)
+    "momentum_factor": 0.9,                # Momentum for velocity buffer
+    "use_momentum_correction": True,       # Enable DGC momentum (recommended)
+    "sample_ratio": 0.01,                  # Sampling for threshold finding
+}
+```
+
+**Key Features:**
+- 10-100x communication reduction
+- Compatible with SMPC and DP
+- Momentum correction maintains convergence
+- See [GRADIENT_PRUNING_GUIDE.md](GRADIENT_PRUNING_GUIDE.md) for detailed usage
 
 ### Poisoning Attack Configuration
 Configure poisoning attacks via the `poisoning_attacks` section in `config.py`:

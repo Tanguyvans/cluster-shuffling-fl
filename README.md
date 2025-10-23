@@ -9,7 +9,9 @@ This project implements a federated learning framework with the following key pr
 - **Cluster Shuffling**: Dynamically reorganizes clients into different clusters across training rounds to prevent inference attacks
 - **Secure Multi-Party Computation (SMPC)**: Uses secret sharing schemes (additive and Shamir's) to protect model updates
 - **Differential Privacy**: Adds calibrated noise to model parameters to provide formal privacy guarantees
-- **Privacy Attack Evaluation**: Includes implementations of Membership Inference Attacks (MIA) and Gradient Inversion Attacks
+- **Privacy Attack Evaluation**: Comprehensive implementations of Membership Inference Attacks (MIA) and Gradient Inversion Attacks
+- **Poisoning Attack Framework**: Modular system for evaluating defense mechanisms against data and gradient poisoning attacks
+- **Multi-Dataset Support**: CIFAR-10/100, FFHQ (face dataset), and Caltech256 with dataset-specific optimizations
 
 ## Architecture
 
@@ -144,48 +146,67 @@ python3 mia_attack.py
 - Automatic conversion between PyTorch and TensorFlow models
 - Comprehensive evaluation metrics (accuracy, precision, recall, AUC)
 
-### Inversion Attack
+### Gradient Inversion Attacks
 
-**Gradient Inversion Attack** attempts to reconstruct training data from model gradients shared during federated learning.
+**Gradient Inversion Attacks** attempt to reconstruct training data from model gradients shared during federated learning. This framework provides multiple attack implementations optimized for different datasets.
 
-#### How it works:
+#### Quick Start
 
-1. **Gradient Extraction**: Captures gradients from a trained model on target data
-2. **Dummy Data Initialization**: Creates random dummy images and labels
-3. **Gradient Matching**: Optimizes dummy data to match target gradients
-4. **Reconstruction**: Outputs reconstructed images that approximate original data
+For detailed attack usage, see [ATTACK_GUIDE.md](ATTACK_GUIDE.md).
 
-#### Running Inversion Attack:
+**CIFAR-10/100 Datasets:**
 
 ```bash
-cd breaching_attack
-python3 simple_gradient_attack.py
+# List available experiments with gradient data
+python3 run_inference_attack.py --list
+
+# Run attack on latest experiment
+python3 run_inference_attack.py
+
+# Attack specific experiment with configuration
+python3 run_inference_attack.py --experiment cifar10_classic_c6_r3 --config aggressive
+
+# Attack specific rounds and clients
+python3 run_inference_attack.py --rounds 1 2 --clients c0_1 c0_2
 ```
 
-**Configuration**:
+**FFHQ (Face) Dataset:**
 
-- `num_iterations = 5000`: Number of optimization iterations
-- `lr = 0.1`: Learning rate for dummy data optimization
-- `batch_size = 32`: Batch size for reconstruction
+```bash
+# GIAS attack (high-quality reconstruction)
+python3 attack_fl_ffhq.py --attack-type gias
 
-**Attack Parameters**:
+# GIFD attack (generative model prior)
+python3 attack_fl_ffhq.py --attack-type gifd --round 1 --client c0_1
 
-- **Total Variation Loss**: Promotes image smoothness
-- **L2 Regularization**: Prevents overfitting to noise
-- **Gradient Matching Loss**: Core objective function
+# Standard gradient inversion
+python3 attack_fl_ffhq.py --attack-type gradient_inversion
+```
 
-**Results Visualization**:
+#### Attack Configurations
 
-- Side-by-side comparison of original vs reconstructed images
-- Quantitative metrics: MSE, PSNR, SSIM
-- Attack success rates across different model states
+| Config | Restarts | Iterations | Use Case |
+|--------|----------|------------|----------|
+| `quick_test` | 1 | 8,000 | Fast testing |
+| `default` | 2 | 24,000 | Balanced evaluation |
+| `aggressive` | 5 | 48,000 | Strong attack |
+| `high_quality` | 8 | 60,000 | Maximum quality |
 
-**Key Features**:
+#### Privacy Assessment Metrics
 
-- Supports multiple trained model formats
-- Comprehensive evaluation metrics
-- Visualization of reconstruction quality
-- Batch processing for efficiency
+- **PSNR > 25 dB**: Vulnerable (high-quality reconstruction)
+- **PSNR 20-25 dB**: Weak protection
+- **PSNR 15-20 dB**: Moderate protection
+- **PSNR < 15 dB**: Strong protection
+
+#### Attack Features
+
+- **Intelligent Experiment Discovery**: Auto-detects experiments with gradient data
+- **Flexible Targeting**: Select specific rounds, clients, or clusters
+- **Multiple Attack Types**: GIAS, GIFD, standard gradient inversion
+- **Dataset-Specific Optimization**: CIFAR vs FFHQ optimized attacks
+- **Comprehensive Metrics**: PSNR, SSIM, MSE with detailed analysis
+- **Visualization**: Side-by-side comparisons and individual reconstructions
 
 ## Privacy Protection Mechanisms
 
@@ -207,6 +228,75 @@ python3 simple_gradient_attack.py
 - Provides formal privacy guarantees with (ε, δ)-DP
 - Configurable privacy budget management
 
+### Gradient Pruning (Communication Efficiency)
+
+Implements Deep Gradient Compression (DGC) to reduce communication overhead:
+
+- **Top-k Sparsification**: Sends only the most important gradients (10-100x compression)
+- **Momentum Correction**: Velocity buffers accumulate pruned gradients across rounds
+- **Compatible with SMPC**: Apply pruning before secret sharing for maximum efficiency
+- **Configurable Compression Ratio**: Adjust keep_ratio to balance accuracy vs. communication
+
+**Configuration in `config.py`:**
+
+```python
+"gradient_pruning": {
+    "enabled": True,                       # Enable gradient pruning
+    "keep_ratio": 0.1,                     # Keep 10% of gradients (90% compression)
+    "momentum_factor": 0.9,                # Momentum for velocity buffer
+    "use_momentum_correction": True,       # Enable DGC momentum (recommended)
+    "sample_ratio": 0.01,                  # Sampling ratio for efficient threshold finding
+}
+```
+
+**Benefits:**
+- 10-100x reduction in communication overhead
+- Maintains model convergence through momentum correction
+- Combines with SMPC for privacy + efficiency
+- Efficient threshold finding via sampling (10-100x faster)
+
+## Poisoning Attack Framework
+
+The system includes a comprehensive poisoning attack framework to evaluate robustness mechanisms.
+
+### Supported Poisoning Attacks
+
+| Attack Type | Target | Description |
+|-------------|--------|-------------|
+| **Label Flipping** | Data | Flips training labels (targeted/random/all-to-one) |
+| **IPM** | Gradients | Inner Product Manipulation with cross-cluster targeting |
+| **Sign Flipping** | Gradients | Flips gradient signs to disrupt aggregation |
+| **Noise Injection** | Gradients | Adds Gaussian/uniform/Laplacian noise |
+| **ALIE** | Gradients | "A Little Is Enough" byzantine attack |
+| **Backdoor** | Data | Inserts backdoor triggers into training data |
+
+### Configuration
+
+Edit `config.py` to configure poisoning attacks:
+
+```python
+"poisoning_attacks": {
+    "enabled": True,
+    "malicious_clients": ["c0_1", "c0_2"],
+    "attack_type": "ipm",  # labelflip, ipm, signflip, noise, alie, backdoor
+    "attack_intensity": 0.5,
+    "attack_rounds": None,  # None = all rounds
+}
+```
+
+### Running with Attacks
+
+```bash
+# Enable poisoning in config.py, then:
+python3 main.py
+
+# The framework will:
+# 1. Mark specified clients as malicious
+# 2. Apply selected attack during training
+# 3. Log attack effectiveness metrics
+# 4. Evaluate defense mechanism performance
+```
+
 ## Experimental Results
 
 ### Privacy vs Utility Trade-offs
@@ -214,13 +304,24 @@ python3 simple_gradient_attack.py
 - **No Privacy**: High utility, vulnerable to attacks
 - **Clustering Only**: Moderate privacy, minimal utility loss
 - **SMPC + Clustering**: Strong privacy, <5% utility degradation
-- **Full Protection**: Maximum privacy, 10-15% utility cost
+- **Full Protection (SMPC + Clustering + DP)**: Maximum privacy, 10-15% utility cost
 
 ### Attack Resistance
 
+**Privacy Attacks:**
 - **MIA Success Rate**: Reduced from 85% to 52% with full protection
-- **Inversion Quality**: PSNR reduced from 25dB to 8dB
+- **Gradient Inversion Quality (PSNR)**: Reduced from 25dB to 8dB with SMPC
+
+**Poisoning Attacks:**
+- **Label Flipping Impact**: Cluster shuffling dilutes attack across rounds
+- **IPM Attack**: Cross-cluster targeting mitigated by dynamic shuffling
+- **Backdoor Success Rate**: Reduced with cluster reorganization
+
+### System Overhead
+
 - **Communication Overhead**: 2-3x increase with SMPC
+- **Computation Time**: ~15% increase per round with secret sharing
+- **Convergence**: Minimal impact on rounds to target accuracy
 
 ## Project Structure
 

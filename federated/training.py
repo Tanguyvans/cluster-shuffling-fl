@@ -55,7 +55,12 @@ def train_client(client_obj, metrics_tracker=None, current_round=0, training_bar
             experiment_config['num_classes'] = 10  # Default
             
         client_obj.save_client_model(current_round, model_weights=weights, save_gradients=save_gradients, experiment_config=experiment_config)
-        
+
+        # Save pruned model if gradient pruning was applied
+        if hasattr(client_obj, 'last_pruned_parameters') and client_obj.last_pruned_parameters is not None:
+            print(f"[Client {client_obj.id}] Saving pruned model for attack comparison...")
+            client_obj.save_pruned_model(current_round, client_obj.last_pruned_parameters, experiment_config=experiment_config)
+
         # If gradients are requested but not yet captured, try to capture them
         if save_gradients and not hasattr(client_obj, 'last_gradients'):
             print(f"[Client {client_obj.id}] Attempting to capture gradients for attack evaluation...")

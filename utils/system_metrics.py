@@ -14,6 +14,7 @@ class MetricsTracker:
         self.protocol_communications = []  # Communications du protocole
         self.storage_communications = []   # Communications de stockage
         self.time_measurements = []
+        self.pruning_measurements = []     # Gradient pruning statistics
         self.start_time = None
         self.global_start_time = None
         self.global_start_energy = None
@@ -97,6 +98,15 @@ class MetricsTracker:
             'phase': phase,
             'timestamp': datetime.now()
         })
+
+    def record_pruning(self, round_num, client_id, pruning_stats):
+        """Record gradient pruning statistics"""
+        self.pruning_measurements.append({
+            'round': round_num,
+            'client_id': client_id,
+            'timestamp': datetime.now(),
+            **pruning_stats
+        })
         
     def save_metrics(self):
         duration = (datetime.now() - self.start_time).total_seconds()
@@ -136,7 +146,16 @@ class MetricsTracker:
         
         # Storage Communication metrics
         total_storage = sum(m['size'] for m in self.storage_communications)
-        
+
+        # Gradient Pruning metrics
+        pruning_enabled = len(self.pruning_measurements) > 0
+        if pruning_enabled:
+            avg_compression = sum(m.get('compression_factor', 1.0) for m in self.pruning_measurements) / len(self.pruning_measurements)
+            avg_sparsity = sum(m.get('sparsity', 0.0) for m in self.pruning_measurements) / len(self.pruning_measurements)
+            avg_comm_savings = sum(m.get('communication_savings', 0.0) for m in self.pruning_measurements) / len(self.pruning_measurements)
+            total_kept = sum(m.get('kept_parameters', 0) for m in self.pruning_measurements)
+            total_params = sum(m.get('total_parameters', 0) for m in self.pruning_measurements)
+
         with open(f"{self.save_results}/communication_metrics.txt", "w") as f:
             f.write("=== Communication Overhead Metrics ===\n\n")
             f.write("--- Protocol Communication ---\n")
@@ -154,7 +173,30 @@ class MetricsTracker:
             f.write(f"Total Storage Communication: {total_storage:.2f} MB\n")
             f.write("\nNote: Storage communication represents potential network overhead\n")
             f.write("if models were stored on a remote server instead of locally.\n")
-            
+
+            # Gradient Pruning section
+            if pruning_enabled:
+                f.write("\n--- Gradient Pruning (DGC) ---\n")
+                f.write(f"Status: ENABLED\n")
+                f.write(f"Average Compression Factor: {avg_compression:.1f}x\n")
+                f.write(f"Average Sparsity: {avg_sparsity*100:.1f}%\n")
+                f.write(f"Average Communication Savings: {avg_comm_savings*100:.1f}%\n")
+                f.write(f"Total Parameters Transmitted: {total_kept:,} / {total_params:,}\n")
+                f.write(f"Number of Pruned Transmissions: {len(self.pruning_measurements)}\n")
+
+                # Calculate baseline communication without pruning
+                if total_params > 0:
+                    baseline_mb = (total_params * 4) / (1024 * 1024)  # float32
+                    actual_mb = (total_kept * 8) / (1024 * 1024)  # sparse (value + index)
+                    saved_mb = baseline_mb - actual_mb
+                    f.write(f"\nEstimated Communication Impact:\n")
+                    f.write(f"  Without Pruning: ~{baseline_mb:.2f} MB\n")
+                    f.write(f"  With Pruning: ~{actual_mb:.2f} MB\n")
+                    f.write(f"  Saved: ~{saved_mb:.2f} MB ({(saved_mb/baseline_mb)*100:.1f}%)\n")
+            else:
+                f.write("\n--- Gradient Pruning ---\n")
+                f.write(f"Status: DISABLED\n")
+
             f.write("\n=== Detailed Measurements ===\n")
             f.write("\n-- Protocol Communications --\n")
             for m in self.protocol_communications:
@@ -163,6 +205,14 @@ class MetricsTracker:
             f.write("\n-- Storage Communications --\n")
             for m in self.storage_communications:
                 f.write(f"Round {m['round']}, {m['operation']}: {m['size']:.2f} MB at {m['timestamp']}\n")
+
+            if pruning_enabled:
+                f.write("\n-- Gradient Pruning Statistics --\n")
+                for m in self.pruning_measurements:
+                    f.write(f"Round {m['round']}, {m['client_id']}: "
+                           f"Compression {m.get('compression_factor', 1.0):.1f}x, "
+                           f"Kept {m.get('kept_parameters', 0):,}/{m.get('total_parameters', 0):,} params, "
+                           f"Savings {m.get('communication_savings', 0.0)*100:.1f}%\n")
         
         # Time metrics
         with open(f"{self.save_results}/time_metrics.txt", "w") as f:
