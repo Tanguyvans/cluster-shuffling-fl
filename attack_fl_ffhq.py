@@ -207,6 +207,94 @@ def visualize_results(ground_truth, reconstructed, metrics_dict, save_path="fl_a
     plt.close()
 
 
+def visualize_batch_results(ground_truth_batch, reconstructed_batch, metrics_dict, save_path="fl_attack_batch_results.png"):
+    """Visualize batch attack results - show grid of GT vs reconstructed images"""
+    num_images = len(ground_truth_batch)
+
+    # Create grid layout: if more than 16 images, use 2 rows of comparisons with multiple columns
+    # For 32 images: 4 rows x 16 columns (2 GT rows + 2 reconstructed rows, each showing 16 images)
+    if num_images <= 8:
+        # Small batch: 2 rows x num_images columns
+        ncols = num_images
+        fig, axes = plt.subplots(2, ncols, figsize=(2 * ncols, 4))
+        if num_images == 1:
+            axes = axes.reshape(2, 1)
+
+        for i in range(num_images):
+            gt_img = denormalize(ground_truth_batch[i].cpu()).permute(1, 2, 0).numpy()
+            rec_img = denormalize(reconstructed_batch[i].cpu()).permute(1, 2, 0).numpy()
+            gt_img = np.clip(gt_img, 0, 1)
+            rec_img = np.clip(rec_img, 0, 1)
+
+            axes[0, i].imshow(gt_img)
+            if i == 0:
+                axes[0, i].set_ylabel("GT", fontsize=10, fontweight='bold')
+            axes[0, i].set_title(f"{i+1}", fontsize=8)
+            axes[0, i].axis('off')
+
+            axes[1, i].imshow(rec_img)
+            if i == 0:
+                axes[1, i].set_ylabel("Rec", fontsize=10, fontweight='bold')
+            if 'psnr_per_image' in metrics_dict and i < len(metrics_dict['psnr_per_image']):
+                psnr = metrics_dict['psnr_per_image'][i]
+                axes[1, i].set_xlabel(f"{psnr:.1f}", fontsize=7)
+            axes[1, i].axis('off')
+    else:
+        # Large batch: split into 2 groups (e.g., 32 images = 2x16)
+        ncols = 16
+        nrows_per_group = 2  # GT row + reconstructed row
+        ngroups = (num_images + ncols - 1) // ncols  # Ceiling division
+
+        fig, axes = plt.subplots(ngroups * nrows_per_group, ncols, figsize=(32, 4 * ngroups))
+
+        for i in range(num_images):
+            group = i // ncols  # Which group (0 or 1 for 32 images)
+            col = i % ncols     # Column within the group
+
+            gt_img = denormalize(ground_truth_batch[i].cpu()).permute(1, 2, 0).numpy()
+            rec_img = denormalize(reconstructed_batch[i].cpu()).permute(1, 2, 0).numpy()
+            gt_img = np.clip(gt_img, 0, 1)
+            rec_img = np.clip(rec_img, 0, 1)
+
+            # GT row for this group
+            gt_row = group * nrows_per_group
+            axes[gt_row, col].imshow(gt_img)
+            if col == 0:
+                axes[gt_row, col].set_ylabel("GT", fontsize=10, fontweight='bold')
+            axes[gt_row, col].set_title(f"{i+1}", fontsize=8)
+            axes[gt_row, col].axis('off')
+
+            # Reconstructed row for this group
+            rec_row = group * nrows_per_group + 1
+            axes[rec_row, col].imshow(rec_img)
+            if col == 0:
+                axes[rec_row, col].set_ylabel("Rec", fontsize=10, fontweight='bold')
+            if 'psnr_per_image' in metrics_dict and i < len(metrics_dict['psnr_per_image']):
+                psnr = metrics_dict['psnr_per_image'][i]
+                axes[rec_row, col].set_xlabel(f"{psnr:.1f}", fontsize=7)
+            axes[rec_row, col].axis('off')
+
+        # Hide unused subplots if num_images doesn't fill the grid exactly
+        for i in range(num_images, ngroups * ncols):
+            group = i // ncols
+            col = i % ncols
+            gt_row = group * nrows_per_group
+            rec_row = group * nrows_per_group + 1
+            axes[gt_row, col].axis('off')
+            axes[rec_row, col].axis('off')
+
+    # Add overall metrics as suptitle
+    avg_psnr = metrics_dict.get('avg_psnr', 0)
+    num_total = metrics_dict.get('num_images', num_images)
+    fig.suptitle(f"Batch Reconstruction Results - {num_total} images | Avg PSNR: {avg_psnr:.2f} dB",
+                 fontsize=14, fontweight='bold', y=0.995)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.99])
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"\nBatch results saved to {save_path}")
+    plt.close()
+
+
 def run_attack(experiment_name, round_num, client_id, attack_type='gias'):
     """
     Run gradient inversion attack on FL-trained model
@@ -281,12 +369,21 @@ def run_attack(experiment_name, round_num, client_id, attack_type='gias'):
     dm = torch.tensor(FFHQ_MEAN, device=device).view(3, 1, 1)
     ds = torch.tensor(FFHQ_STD, device=device).view(3, 1, 1)
 
+    # Try to reconstruct the full batch (all images)
+    num_images_to_reconstruct = len(ground_truth_labels)
+
+    print(f"\nBatch information:")
+    print(f"  - Total images in batch: {len(ground_truth_labels)}")
+    print(f"  - Unique classes: {len(torch.unique(ground_truth_labels))} classes")
+    print(f"  - Attempting to reconstruct ALL {num_images_to_reconstruct} images from batch")
+    print(f"  - Note: This is challenging since multiple images share the same class label")
+
     reconstructor = GradientReconstructor(
         model,
         device,
         mean_std=(dm, ds),
         config=config,
-        num_images=1,
+        num_images=num_images_to_reconstruct,  # Reconstruct all 32 images
         bn_prior=[],
         G=None
     )
@@ -294,6 +391,7 @@ def run_attack(experiment_name, round_num, client_id, attack_type='gias'):
     # Run attack
     print(f"\nStarting gradient inversion attack...")
     print(f"  - Target: {client_id} from round {round_num}")
+    print(f"  - Reconstructing full batch of {num_images_to_reconstruct} images")
     start_time = time.time()
 
     # Get image shape from ground truth
@@ -338,56 +436,88 @@ def run_attack(experiment_name, round_num, client_id, attack_type='gias'):
     else:
         raise ValueError(f"Unexpected return type: {type(reconstructed_data)}")
 
-    # Ensure we have the right shape
+    # Ensure we have the right shape - output should be [num_images, C, H, W]
     if isinstance(output, torch.Tensor):
-        reconstructed_img = output[0] if output.dim() == 4 else output
+        if output.dim() == 4:
+            reconstructed_imgs = output  # Already [batch, C, H, W]
+        elif output.dim() == 3:
+            reconstructed_imgs = output.unsqueeze(0)  # [C, H, W] -> [1, C, H, W]
+        else:
+            raise ValueError(f"Unexpected tensor shape: {output.shape}")
     else:
         raise ValueError(f"Output is not a tensor: {type(output)}")
 
-    # Calculate metrics
-    print("\nCalculating attack metrics...")
-    gt_img = ground_truth_images[0]
+    print(f"\nReconstructed {reconstructed_imgs.shape[0]} images")
 
-    # Ensure both images are on CPU and same shape
-    gt_img_cpu = gt_img.cpu().unsqueeze(0)
-    rec_img_cpu = reconstructed_img.cpu().unsqueeze(0)
+    # Calculate metrics for each reconstructed image
+    print("\nCalculating attack metrics for all images...")
 
-    psnr = metrics.psnr(rec_img_cpu, gt_img_cpu)
-    ssim_val = metrics.ssim(rec_img_cpu, gt_img_cpu)
-    mse = metrics.total_variation(rec_img_cpu - gt_img_cpu).item()
-    lpips_val = metrics.lpips(rec_img_cpu, gt_img_cpu, device=device)
+    psnr_list = []
+    ssim_list = []
+    mse_list = []
+
+    # Calculate metrics for each image pair
+    num_to_compare = min(len(ground_truth_images), len(reconstructed_imgs))
+    for i in range(num_to_compare):
+        gt_img = ground_truth_images[i].cpu().unsqueeze(0)
+        rec_img = reconstructed_imgs[i].cpu().unsqueeze(0)
+
+        psnr_val = metrics.psnr(rec_img, gt_img)
+        ssim_val = metrics.ssim(rec_img, gt_img)
+        mse_val = metrics.total_variation(rec_img - gt_img).item()
+
+        # Convert tensors to floats
+        if torch.is_tensor(psnr_val):
+            psnr_val = psnr_val.item()
+        if torch.is_tensor(ssim_val):
+            ssim_val = ssim_val.item()
+
+        psnr_list.append(float(psnr_val))
+        ssim_list.append(float(ssim_val))
+        mse_list.append(float(mse_val))
+
+    # Calculate average metrics
+    avg_psnr = sum(psnr_list) / len(psnr_list) if psnr_list else 0.0
+    avg_ssim = sum(ssim_list) / len(ssim_list) if ssim_list else 0.0
+    avg_mse = sum(mse_list) / len(mse_list) if mse_list else 0.0
 
     metrics_dict = {
-        'psnr': psnr,
-        'ssim': ssim_val,
-        'mse': mse,
-        'lpips': lpips_val,
-        'attack_time': attack_time,
+        'avg_psnr': float(avg_psnr),
+        'avg_ssim': float(avg_ssim),
+        'avg_mse': float(avg_mse),
+        'psnr_per_image': psnr_list,
+        'ssim_per_image': ssim_list,
+        'mse_per_image': mse_list,
+        'num_images': num_to_compare,
+        'attack_time': float(attack_time),
         'experiment': experiment_name,
-        'round': round_num,
+        'round': int(round_num),
         'client': client_id,
         'attack_type': attack_type
     }
 
-    print(f"\nAttack Results:")
-    print(f"  - PSNR: {psnr:.2f} dB")
-    print(f"  - SSIM: {ssim_val:.4f}")
-    print(f"  - MSE: {mse:.6f}")
-    print(f"  - LPIPS: {lpips_val:.4f}")
+    print(f"\nAttack Results (averaged over {num_to_compare} images):")
+    print(f"  - Average PSNR: {avg_psnr:.2f} dB")
+    print(f"  - Average SSIM: {avg_ssim:.4f}")
+    print(f"  - Average MSE: {avg_mse:.6f}")
+    print(f"  - PSNR range: {min(psnr_list):.2f} - {max(psnr_list):.2f} dB")
 
-    # Visualize and save results
+    # Visualize and save results - show all images in the batch
     save_prefix = f"fl_{experiment_name}_r{round_num}_{client_id}_{attack_type}"
-    visualize_results(
-        gt_img,
-        reconstructed_img,
+    num_to_show = num_to_compare  # Show all images
+
+    # Create comparison grid
+    visualize_batch_results(
+        ground_truth_images[:num_to_show],
+        reconstructed_imgs[:num_to_show],
         metrics_dict,
         save_path=f"{save_prefix}_results.png"
     )
 
     # Save full results
     torch.save({
-        'ground_truth': gt_img.cpu(),
-        'reconstructed': reconstructed_img.cpu(),
+        'ground_truth': ground_truth_images.cpu(),
+        'reconstructed': reconstructed_imgs.cpu(),
         'labels': ground_truth_labels.cpu(),
         'metrics': metrics_dict,
         'config': config if isinstance(config, dict) else config.__dict__
@@ -497,8 +627,19 @@ Examples:
     print(f"Round: {args.round}")
     print(f"Client: {args.client}")
     print(f"Attack: {args.attack_type.upper()}")
-    print(f"PSNR: {metrics_dict['psnr']:.2f} dB")
-    print(f"SSIM: {metrics_dict['ssim']:.4f}")
+
+    # Handle both batch and single-image metrics
+    if 'avg_psnr' in metrics_dict:
+        # Batch reconstruction
+        print(f"Images reconstructed: {metrics_dict['num_images']}")
+        print(f"Average PSNR: {metrics_dict['avg_psnr']:.2f} dB")
+        print(f"Average SSIM: {metrics_dict['avg_ssim']:.4f}")
+        print(f"PSNR range: {min(metrics_dict['psnr_per_image']):.2f} - {max(metrics_dict['psnr_per_image']):.2f} dB")
+    else:
+        # Single image reconstruction
+        print(f"PSNR: {metrics_dict['psnr']:.2f} dB")
+        print(f"SSIM: {metrics_dict['ssim']:.4f}")
+
     print(f"Time: {metrics_dict['attack_time']:.2f}s")
     print(f"{'='*70}\n")
 

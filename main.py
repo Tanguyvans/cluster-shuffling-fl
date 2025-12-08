@@ -3,8 +3,8 @@ import threading
 import os
 import time
 import json
-import sys 
 import sys
+import argparse
 
 from federated import create_nodes, create_clients, cluster_generation, train_client
 from utils import initialize_parameters
@@ -23,14 +23,45 @@ warnings.filterwarnings("ignore")
 client_weights = []
 
 if __name__ == "__main__":
+    # Parse command-line arguments for experiment configuration
+    parser = argparse.ArgumentParser(description='Federated Learning Training')
+    parser.add_argument('--experiment', type=str, default=None, help='Experiment name (overrides config.py)')
+    parser.add_argument('--rounds', type=int, default=None, help='Number of rounds (overrides config.py)')
+    parser.add_argument('--epochs', type=int, default=None, help='Number of epochs (overrides config.py)')
+    parser.add_argument('--clustering', type=str, default=None, choices=['true', 'false'], help='Enable clustering')
+    parser.add_argument('--smpc', type=str, default=None, choices=['none', 'additif', 'shamir'], help='SMPC type')
+    parser.add_argument('--pruning', type=str, default=None, choices=['true', 'false'], help='Enable gradient pruning')
+    parser.add_argument('--save-gradients', type=str, default=None, choices=['true', 'false'], help='Enable gradient saving')
+    parser.add_argument('--save-gradients-rounds', type=str, default=None, help='Comma-separated rounds to save (e.g., "1,2,3")')
+    args = parser.parse_args()
+
+    # Override settings with command-line arguments if provided
+    if args.experiment:
+        settings['save_results'] = f'results/{args.experiment}/'
+    if args.rounds:
+        settings['n_rounds'] = args.rounds
+    if args.epochs:
+        settings['n_epochs'] = args.epochs
+    if args.clustering:
+        settings['clustering'] = (args.clustering == 'true')
+    if args.smpc:
+        settings['type_ss'] = args.smpc
+    if args.pruning:
+        settings['gradient_pruning']['enabled'] = (args.pruning == 'true')
+    if args.save_gradients:
+        settings['save_gradients'] = (args.save_gradients == 'true')
+    if args.save_gradients_rounds:
+        # Parse comma-separated rounds: "1,2,3" -> [1, 2, 3]
+        settings['save_gradients_rounds'] = [int(r.strip()) for r in args.save_gradients_rounds.split(',')]
+
     logging.basicConfig(level=logging.DEBUG)
     training_barrier, length = initialize_parameters(settings, 'CFL')
-    
+
     # Create metrics tracker at the very beginning
     metrics_tracker = MetricsTracker(settings['save_results'])
     metrics_tracker.start_tracking()
     metrics_tracker.measure_global_power("start")
-    
+
     # Create model manager for structured model saving
     experiment_name = os.path.basename(settings['save_results'].rstrip('/'))
     model_manager = ModelManager(experiment_name)
@@ -219,5 +250,8 @@ if __name__ == "__main__":
     metrics_tracker.measure_global_power("complete")
     metrics_tracker.save_metrics()
     print("\nTraining completed. Exiting program...")
-    
-    sys.exit(0)
+
+    # Force exit to kill all daemon threads (server/client threads)
+    # This is necessary because server.start_server() creates long-running threads
+    print("✓ Shutting down all threads...")
+    os._exit(0)  # Force immediate exit, killing all threads

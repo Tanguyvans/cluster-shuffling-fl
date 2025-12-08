@@ -35,7 +35,7 @@ settings = {
     "coef_useful": 1.05,
     "tolerance_ceil": 0.08,
 
-    "n_rounds": 10,             # Normal number of rounds
+    "n_rounds": 3,              # Reduced for attack evaluation
     "choice_loss": "cross_entropy",
     "choice_optimizer": "Adam",
     "lr": 0.001,
@@ -56,9 +56,9 @@ settings = {
     "m": 3,
     "ts": 5,
 
-    # Gradient saving disabled for normal training
-    "save_gradients": False,                  # Disable gradient saving
-    "save_gradients_rounds": [],              # No rounds to save
+    # Gradient saving enabled for attack evaluation
+    "save_gradients": True,                   # Enable gradient saving
+    "save_gradients_rounds": [1, 2, 3],       # Rounds to save gradients
     "use_pytorch_smpc": True,                  # Use pure PyTorch SMPC (no NumPy)
     "aggregation_method": "weights",         # "weights" or "gradients" - what to use for SMPC/aggregation
                                                # "gradients": More private, smaller data, better for attacks

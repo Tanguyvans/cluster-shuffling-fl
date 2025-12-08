@@ -21,13 +21,15 @@ def initialize_parameters(settings, training_approach):
         config_parts.append("dp")
     
     config_suffix = "_".join(config_parts) if config_parts else "classic"
-    
+
     # Create informative directory name with key parameters
-    result_dir = f"results/{dataset_name}_{config_suffix}_c{n_clients}_r{n_rounds}/"
-    
+    # Only set save_results if not already set (e.g., by command-line args)
+    if "save_results" not in settings or not settings["save_results"]:
+        result_dir = f"results/{dataset_name}_{config_suffix}_c{n_clients}_r{n_rounds}/"
+        settings["save_results"] = result_dir
+
     settings["roc_path"] = None  # "roc"
     settings["matrix_path"] = None  # "matrix"
-    settings["save_results"] = result_dir
     # Legacy save_model removed - ModelManager handles all model saving
     # Legacy client models directory - now handled by ModelManager
 
