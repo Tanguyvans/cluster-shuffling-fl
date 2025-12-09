@@ -128,7 +128,8 @@ def load_fl_artifacts(experiment_name, round_num, client_id):
     gradient_path = results_dir / f"{client_id}_gradients.pt"
     gradient_data = torch.load(gradient_path, map_location='cpu')
 
-    gradients = gradient_data['gradients']
+    # Move all tensors to the target device (CUDA)
+    gradients = [g.to(device) for g in gradient_data['gradients']]
     images = gradient_data['batch_images'].to(device)
     labels = gradient_data['batch_labels'].to(device)
 
@@ -369,14 +370,19 @@ def run_attack(experiment_name, round_num, client_id, attack_type='gias'):
     dm = torch.tensor(FFHQ_MEAN, device=device).view(3, 1, 1)
     ds = torch.tensor(FFHQ_STD, device=device).view(3, 1, 1)
 
-    # Try to reconstruct the full batch (all images)
-    num_images_to_reconstruct = len(ground_truth_labels)
+    # Limit images to reconstruct to avoid OOM with StyleGAN2
+    # StyleGAN2 generates 1024x1024 images which uses ~20GB+ VRAM for 32 images
+    max_images = 4  # Reconstruct up to 4 images (adjust based on available VRAM)
+    num_images_to_reconstruct = min(max_images, len(ground_truth_labels))
+
+    # Slice the data to only reconstruct first N images
+    ground_truth_images = ground_truth_images[:num_images_to_reconstruct]
+    ground_truth_labels = ground_truth_labels[:num_images_to_reconstruct]
 
     print(f"\nBatch information:")
-    print(f"  - Total images in batch: {len(ground_truth_labels)}")
-    print(f"  - Unique classes: {len(torch.unique(ground_truth_labels))} classes")
-    print(f"  - Attempting to reconstruct ALL {num_images_to_reconstruct} images from batch")
-    print(f"  - Note: This is challenging since multiple images share the same class label")
+    print(f"  - Total images in original batch: {len(artifacts['labels'])}")
+    print(f"  - Images to reconstruct: {num_images_to_reconstruct} (limited to save VRAM)")
+    print(f"  - Labels for reconstruction: {ground_truth_labels.tolist()}")
 
     reconstructor = GradientReconstructor(
         model,

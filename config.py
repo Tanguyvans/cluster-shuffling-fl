@@ -13,19 +13,19 @@ DATASET_PATHS = {
 }
 
 settings = {
-    "name_dataset": "cifar10",  # "cifar10", "cifar100", "ffhq128", "caltech256"
+    "name_dataset": "ffhq128",  # "cifar10", "cifar100", "ffhq128", "caltech256"
     "data_root": DATASET_ROOT,  # Root directory for all datasets
-    "arch": "simplenet",        # simplenet, mobilenet, resnet18, shufflenet, squeezenet, efficientnet
+    "arch": "simplenet",        # simplenet is more vulnerable to gradient inversion attacks
     "pretrained": False,        # Use pretrained weights
-    "input_size": 32,           # Input size (32 for CIFAR, 128 for FFHQ)
+    "input_size": 128,          # Input size (32 for CIFAR, 128 for FFHQ)
     "patience": 3,
-    "batch_size": 32,           # Normal batch size for training
-    "n_epochs": 5,              # Multiple epochs for proper training
-    "num_classes": 10,          # 10 classes for CIFAR-10
+    "batch_size": 4,            # Small batch for attack vulnerability (original GIFD uses 1-4)
+    "n_epochs": 1,              # Single epoch - early gradients are better for attacks
+    "num_classes": 6,           # 6 age groups for FFHQ
 
-    # Normal training settings
-    "single_batch_training": False,   # Use full dataset
-    "balanced_class_training": False, # Normal data distribution
+    # Attack vulnerability testing settings
+    "single_batch_training": True,    # Train on single batch (faster, more vulnerable)
+    "balanced_class_training": True,  # One sample per class (easier to attack)
     "max_samples_per_client": None,   # No limit on samples
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,
@@ -66,7 +66,7 @@ settings = {
 
     # Gradient pruning/compression (Deep Gradient Compression)
     "gradient_pruning": {
-        "enabled": True,                       # Enable gradient pruning for communication efficiency
+        "enabled": False,                      # Disable gradient pruning for attack evaluation
         "keep_ratio": 0.1,                     # Fraction of gradients to keep (0.1 = 10%, 90% compression)
         "momentum_factor": 0.9,                # Momentum for velocity buffer (standard: 0.9)
         "use_momentum_correction": True,       # Enable DGC momentum correction (recommended)
@@ -102,7 +102,7 @@ settings = {
             "flip_type": "targeted",               # targeted, random, all_to_one
             "source_class": None,                  # Class to flip from (None = all classes)
             "target_class": 0,                     # Target class for flipping
-            "num_classes": 10
+            "num_classes": 6
         },
         
         "noise_config": {
