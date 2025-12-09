@@ -19,13 +19,13 @@ settings = {
     "pretrained": False,        # Use pretrained weights
     "input_size": 128,          # Input size (32 for CIFAR, 128 for FFHQ)
     "patience": 3,
-    "batch_size": 4,            # Small batch for attack vulnerability (original GIFD uses 1-4)
+    "batch_size": 8,            # Larger batch to test attack difficulty
     "n_epochs": 1,              # Single epoch - early gradients are better for attacks
     "num_classes": 6,           # 6 age groups for FFHQ
 
     # Attack vulnerability testing settings
     "single_batch_training": True,    # Train on single batch (faster, more vulnerable)
-    "balanced_class_training": True,  # One sample per class (easier to attack)
+    "balanced_class_training": False,  # Random sampling (more realistic)
     "max_samples_per_client": None,   # No limit on samples
     "number_of_nodes": 1,
     "number_of_clients_per_node": 6,

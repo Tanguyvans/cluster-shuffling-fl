@@ -245,6 +245,51 @@ python3 measure_communication.py --keep-ratio 0.1
 
 ---
 
+## 🔓 Gradient Inversion Attacks Setup
+
+The framework supports advanced gradient inversion attacks (GIAS, GIFD) using StyleGAN2 generative priors.
+
+### Quick Setup (GIAS - Recommended)
+
+GIAS works out of the box with the included `Gs.pth` weights:
+
+```bash
+# Run GIAS attack on FFHQ
+python3 attack_fl_ffhq.py --attack-type gias
+```
+
+### Advanced Setup (GIFD)
+
+GIFD requires additional model files for inter-layer optimization:
+
+```bash
+# Install gdown for Google Drive downloads
+pip install gdown
+
+# 1. Download gaussian_fit.pt (shape predictor) - place in project root
+gdown --id 1c1qtz3MVTAvJpYvsMIR5MoSvdiwN2DGb
+
+# 2. Create directory for StyleGAN2 checkpoint
+mkdir -p exploitai/attacks/inference/gifd_core/genmodels/stylegan2_io
+
+# 3. Download StyleGAN2 checkpoint (~550MB)
+gdown --id 1JCBiKY_yUixTa6F1eflABL88T4cii2GR -O exploitai/attacks/inference/gifd_core/genmodels/stylegan2_io/stylegan2-ffhq-config-f.pt
+
+# 4. Run GIFD attack
+python3 attack_fl_ffhq.py --attack-type gifd
+```
+
+### Attack Comparison
+
+| Attack | Setup | Quality | Speed | Use Case |
+|--------|-------|---------|-------|----------|
+| **GIAS** | ✅ Ready | Good | Fast | Quick evaluation |
+| **GIFD** | Requires downloads | Best | Slow | Research, publications |
+
+📖 See [Gradient Inversion Guide](docs/attacks/gradient-inversion.md) for detailed usage.
+
+---
+
 ## 📖 Research & Papers
 
 This framework implements and evaluates:
