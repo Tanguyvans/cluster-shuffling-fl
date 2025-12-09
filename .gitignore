@@ -18,11 +18,15 @@ trained_models.npz
 # Large model files
 GIFD_Gradient_Inversion_Attack/inversefed/genmodels/stylegan2_ada_pytorch/cifar10.pkl
 exploitai/attacks/inference/gifd_core/genmodels/stylegan2/Gs.pth
+exploitai/attacks/inference/gifd_core/genmodels/stylegan2_io/*.pt
+gaussian_fit.pt
+shape_predictor_68_face_landmarks.dat
 *.pth
 *.ckpt
 *.h5
 *.pb
 *.onnx
+*.pkl
 
 # macOS
 .DS_Store
